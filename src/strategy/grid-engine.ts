@@ -2,7 +2,7 @@ import type { GridConfig, GridDirection } from "../config";
 import type { ExchangeAdapter } from "../exchanges/adapter";
 import type { AsterAccountSnapshot, AsterDepth, AsterOrder, AsterTicker } from "../exchanges/types";
 import { createTradeLog, type TradeLogEntry } from "../logging/trade-log";
-import { decimalsOf } from "../utils/math";
+import { decimalsOf, formatPriceToString } from "../utils/math";
 import { extractMessage } from "../utils/errors";
 import { getMidOrLast } from "../utils/price";
 import { getPosition, type PositionSnapshot } from "../utils/strategy";
@@ -439,21 +439,45 @@ export class GridEngine {
     const side = qty > 0 ? "SELL" : "BUY";
     const amount = Math.abs(qty);
     try {
-      await placeMarketOrder(
-        this.exchange,
-        this.config.symbol,
-        this.openOrders,
-        this.locks,
-        this.timers,
-        this.pendings,
-        side,
-        amount,
-        this.log,
-        false,
-        undefined,
-        { qtyStep: this.config.qtyStep }
-      );
-      this.log("order", `市价平仓 ${side} ${amount}`);
+      if (this.config.strictLimitOnly) {
+        const reference = this.getReferencePrice();
+        if (!Number.isFinite(reference)) return;
+        const px = Number(reference);
+        const priceDecimals = Math.max(0, Math.floor(Math.log10(1 / this.config.priceTick)));
+        const pxStr = formatPriceToString(px, priceDecimals);
+        await placeOrder(
+          this.exchange,
+          this.config.symbol,
+          this.openOrders,
+          this.locks,
+          this.timers,
+          this.pendings,
+          side,
+          pxStr,
+          amount,
+          this.log,
+          true,
+          undefined,
+          { priceTick: this.config.priceTick, qtyStep: this.config.qtyStep, timeInForce: "IOC" }
+        );
+        this.log("order", `IOC 平仓 ${side} ${amount} @ ${pxStr}`);
+      } else {
+        await placeMarketOrder(
+          this.exchange,
+          this.config.symbol,
+          this.openOrders,
+          this.locks,
+          this.timers,
+          this.pendings,
+          side,
+          amount,
+          this.log,
+          false,
+          undefined,
+          { qtyStep: this.config.qtyStep }
+        );
+        this.log("order", `市价平仓 ${side} ${amount}`);
+      }
     } catch (error) {
       this.log("error", `平仓失败: ${extractMessage(error)}`);
     } finally {
@@ -763,7 +787,8 @@ export class GridEngine {
       }
       if ((plannedKeyCounts.get(key) ?? 0) >= 1) continue;
       if (!desiredKeySet.has(key)) {
-        desired.push({ level, side: "BUY", price: priceStr, amount: this.config.orderSize, intent: "ENTRY" });
+        const boost = Math.max(1, Number(this.config.volumeBoost ?? 1));
+        desired.push({ level, side: "BUY", price: priceStr, amount: this.config.orderSize * boost, intent: "ENTRY" });
         desiredKeySet.add(key);
         plannedKeyCounts.set(key, (plannedKeyCounts.get(key) ?? 0) + 1);
       }
@@ -799,7 +824,8 @@ export class GridEngine {
       }
       if ((plannedKeyCounts.get(key) ?? 0) >= 1) continue;
       if (!desiredKeySet.has(key)) {
-        desired.push({ level, side: "SELL", price: priceStr, amount: this.config.orderSize, intent: "ENTRY" });
+        const boost = Math.max(1, Number(this.config.volumeBoost ?? 1));
+        desired.push({ level, side: "SELL", price: priceStr, amount: this.config.orderSize * boost, intent: "ENTRY" });
         desiredKeySet.add(key);
         plannedKeyCounts.set(key, (plannedKeyCounts.get(key) ?? 0) + 1);
       }

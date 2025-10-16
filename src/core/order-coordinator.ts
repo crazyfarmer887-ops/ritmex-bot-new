@@ -1,5 +1,5 @@
 import type { ExchangeAdapter } from "../exchanges/adapter";
-import type { AsterOrder, CreateOrderParams } from "../exchanges/types";
+import type { AsterOrder, CreateOrderParams, TimeInForce } from "../exchanges/types";
 import { roundDownToTick, roundQtyDownToStep, formatPriceToString } from "../utils/math";
 import { isUnknownOrderError } from "../utils/errors";
 import { isOrderPriceAllowedByMark } from "../utils/strategy";
@@ -125,6 +125,7 @@ type PlaceOrderOptions = {
   priceTick: number;
   qtyStep: number;
   skipDedupe?: boolean;
+  timeInForce?: TimeInForce;
 };
 
 export async function placeOrder(
@@ -154,7 +155,7 @@ export async function placeOrder(
     type,
     quantity: roundQtyDownToStep(amount, qtyStep),
     price: priceNum, // 直接使用字符串转换的数字，不再格式化
-    timeInForce: "GTX",
+    timeInForce: opts?.timeInForce ?? "GTX",
   };
   if (reduceOnly) params.reduceOnly = "true";
   if (!opts?.skipDedupe) {

@@ -470,24 +470,52 @@ export class TrendEngine {
 
   private async submitMarketOrder(side: "BUY" | "SELL", price: number, reason: string): Promise<void> {
     try {
-      await placeMarketOrder(
-        this.exchange,
-        this.config.symbol,
-        this.openOrders,
-        this.locks,
-        this.timers,
-        this.pending,
-        side,
-        this.config.tradeAmount,
-        (type, detail) => this.tradeLog.push(type, detail),
-        false,
-        {
-          markPrice: getPosition(this.accountSnapshot, this.config.symbol).markPrice,
-          expectedPrice: Number(this.tickerSnapshot?.lastPrice) || null,
-          maxPct: this.config.maxCloseSlippagePct,
-        },
-        { qtyStep: this.config.qtyStep }
-      );
+      const boost = Math.max(1, Number(this.config.volumeBoost ?? 1));
+      if (this.config.strictLimitOnly) {
+        const tif: "IOC" | undefined = this.config.strictLimitOnly ? "IOC" : undefined;
+        // Emulate market with immediate-or-cancel limit at the top of book
+        const px = Number(this.tickerSnapshot?.lastPrice ?? price);
+        const priceDecimals = Math.max(0, Math.floor(Math.log10(1 / this.config.priceTick)));
+        const pxStr = formatPriceToString(px, priceDecimals);
+        await placeOrder(
+          this.exchange,
+          this.config.symbol,
+          this.openOrders,
+          this.locks,
+          this.timers,
+          this.pending,
+          side,
+          pxStr,
+          this.config.tradeAmount * boost,
+          (type, detail) => this.tradeLog.push(type, detail),
+          false,
+          {
+            markPrice: getPosition(this.accountSnapshot, this.config.symbol).markPrice,
+            expectedPrice: px,
+            maxPct: this.config.maxCloseSlippagePct,
+          },
+          { priceTick: this.config.priceTick, qtyStep: this.config.qtyStep, timeInForce: tif }
+        );
+      } else {
+        await placeMarketOrder(
+          this.exchange,
+          this.config.symbol,
+          this.openOrders,
+          this.locks,
+          this.timers,
+          this.pending,
+          side,
+          this.config.tradeAmount * boost,
+          (type, detail) => this.tradeLog.push(type, detail),
+          false,
+          {
+            markPrice: getPosition(this.accountSnapshot, this.config.symbol).markPrice,
+            expectedPrice: Number(this.tickerSnapshot?.lastPrice) || null,
+            maxPct: this.config.maxCloseSlippagePct,
+          },
+          { qtyStep: this.config.qtyStep }
+        );
+      }
       this.tradeLog.push("open", `${reason}: ${side} @ ${price}`);
       this.lastOpenPlan = { side, price };
     } catch (err) {
