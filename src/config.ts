@@ -22,6 +22,9 @@ export interface TradingConfig {
   bollingerLength: number;
   bollingerStdMultiplier: number;
   minBollingerBandwidth: number;
+  // New: enforce limit-only execution and boost trade sizes
+  strictLimitOnly: boolean;
+  volumeBoost: number;
 }
 
 const SYMBOL_PRIORITY_BY_EXCHANGE: Record<SupportedExchangeId, { envKeys: string[]; fallback: string }> = {
@@ -78,6 +81,14 @@ export const tradingConfig: TradingConfig = {
   bollingerLength: parseNumber(process.env.BOLLINGER_LENGTH, 20),
   bollingerStdMultiplier: parseNumber(process.env.BOLLINGER_STD_MULTIPLIER, 2),
   minBollingerBandwidth: parseNumber(process.env.MIN_BOLLINGER_BANDWIDTH, 0.001),
+  strictLimitOnly: parseBoolean(
+    process.env.TRADING_STRICT_LIMIT_ONLY ?? process.env.STRICT_LIMIT_ONLY,
+    false
+  ),
+  volumeBoost: parseNumber(
+    process.env.TRADING_VOLUME_BOOST_MULTIPLIER ?? process.env.VOLUME_BOOST_MULTIPLIER,
+    1
+  ),
 };
 
 export interface MakerConfig {
@@ -90,6 +101,9 @@ export interface MakerConfig {
   maxLogEntries: number;
   maxCloseSlippagePct: number;
   priceTick: number;
+  // New: enforce limit-only execution and boost trade sizes
+  strictLimitOnly: boolean;
+  volumeBoost: number;
 }
 
 export const makerConfig: MakerConfig = {
@@ -105,6 +119,14 @@ export const makerConfig: MakerConfig = {
     0.05
   ),
   priceTick: parseNumber(process.env.MAKER_PRICE_TICK ?? process.env.PRICE_TICK, 0.1),
+  strictLimitOnly: parseBoolean(
+    process.env.MAKER_STRICT_LIMIT_ONLY ?? process.env.STRICT_LIMIT_ONLY,
+    false
+  ),
+  volumeBoost: parseNumber(
+    process.env.MAKER_VOLUME_BOOST_MULTIPLIER ?? process.env.VOLUME_BOOST_MULTIPLIER,
+    1
+  ),
 };
 
 export interface BasisArbConfig {
@@ -135,6 +157,9 @@ export interface GridConfig {
   autoRestart: boolean;
   gridMode: "geometric";
   maxCloseSlippagePct: number;
+  // New: enforce limit-only execution and boost trade sizes
+  strictLimitOnly: boolean;
+  volumeBoost: number;
 }
 
 const resolveBasisSymbol = (envKeys: string[], fallback: string): string => {
@@ -200,6 +225,14 @@ export const gridConfig: GridConfig = {
       process.env.GRID_MAX_CLOSE_SLIPPAGE_PCT ?? process.env.MAX_CLOSE_SLIPPAGE_PCT,
       0.05
     )
+  ),
+  strictLimitOnly: parseBoolean(
+    process.env.GRID_STRICT_LIMIT_ONLY ?? process.env.STRICT_LIMIT_ONLY,
+    false
+  ),
+  volumeBoost: parseNumber(
+    process.env.GRID_VOLUME_BOOST_MULTIPLIER ?? process.env.VOLUME_BOOST_MULTIPLIER,
+    1
   ),
 };
 

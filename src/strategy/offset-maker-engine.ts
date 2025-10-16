@@ -287,10 +287,12 @@ export class OffsetMakerEngine {
       if (absPosition < EPS) {
         this.entryPricePendingLogged = false;
         if (!skipBuySide && canEnter) {
-          desired.push({ side: "BUY", price: bidPrice, amount: this.config.tradeAmount, reduceOnly: false });
+          const boost = Math.max(1, Number(this.config.volumeBoost ?? 1));
+          desired.push({ side: "BUY", price: bidPrice, amount: this.config.tradeAmount * boost, reduceOnly: false });
         }
         if (!skipSellSide && canEnter) {
-          desired.push({ side: "SELL", price: askPrice, amount: this.config.tradeAmount, reduceOnly: false });
+          const boost = Math.max(1, Number(this.config.volumeBoost ?? 1));
+          desired.push({ side: "SELL", price: askPrice, amount: this.config.tradeAmount * boost, reduceOnly: false });
         }
       } else {
         const closeSide: "BUY" | "SELL" = position.positionAmt > 0 ? "SELL" : "BUY";
@@ -531,6 +533,7 @@ export class OffsetMakerEngine {
           {
             priceTick: this.config.priceTick,
             qtyStep: 0.001, // 默认数量步长
+            timeInForce: target.reduceOnly && this.config.strictLimitOnly ? "IOC" : undefined,
           }
         );
         // Record last placed entry order timing and price

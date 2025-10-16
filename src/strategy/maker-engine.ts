@@ -304,8 +304,9 @@ export class MakerEngine {
       if (absPosition < EPS) {
         this.entryPricePendingLogged = false;
         if (canEnter) {
-          desired.push({ side: "BUY", price: bidPrice, amount: this.config.tradeAmount, reduceOnly: false });
-          desired.push({ side: "SELL", price: askPrice, amount: this.config.tradeAmount, reduceOnly: false });
+          const boost = Math.max(1, Number(this.config.volumeBoost ?? 1));
+          desired.push({ side: "BUY", price: bidPrice, amount: this.config.tradeAmount * boost, reduceOnly: false });
+          desired.push({ side: "SELL", price: askPrice, amount: this.config.tradeAmount * boost, reduceOnly: false });
         }
       } else {
         const closeSide: "BUY" | "SELL" = position.positionAmt > 0 ? "SELL" : "BUY";
@@ -433,6 +434,7 @@ export class MakerEngine {
           {
             priceTick: this.config.priceTick,
             qtyStep: 0.001, // 默认数量步长
+            timeInForce: target.reduceOnly && this.config.strictLimitOnly ? "IOC" : undefined,
           }
         );
       } catch (error) {
@@ -475,21 +477,27 @@ export class MakerEngine {
       );
       try {
         await this.flushOrders();
-        await marketClose(
+        const side: "BUY" | "SELL" = position.positionAmt > 0 ? "SELL" : "BUY";
+        const priceDecimals = Math.max(0, Math.floor(Math.log10(1 / this.config.priceTick)));
+        const pxStr = formatPriceToString(closeSidePrice, priceDecimals);
+        await placeOrder(
           this.exchange,
           this.config.symbol,
           this.openOrders,
           this.locks,
           this.timers,
           this.pending,
-          position.positionAmt > 0 ? "SELL" : "BUY",
+          side,
+          pxStr,
           absPosition,
           (type, detail) => this.tradeLog.push(type, detail),
+          true,
           {
             markPrice: position.markPrice,
-            expectedPrice: Number(closeSidePrice) || null,
+            expectedPrice: Number(closeSidePrice),
             maxPct: this.config.maxCloseSlippagePct,
-          }
+          },
+          { priceTick: this.config.priceTick, qtyStep: 0.001, timeInForce: this.config.strictLimitOnly ? "IOC" : undefined }
         );
       } catch (error) {
         if (isUnknownOrderError(error)) {
