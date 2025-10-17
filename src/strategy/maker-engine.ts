@@ -468,18 +468,22 @@ export class MakerEngine {
     const triggerStop = shouldStopLoss(position, bidPrice, askPrice, this.config.lossLimit);
 
     if (triggerStop) {
-      // 价格操纵保护：只有平仓方向价格与标记价格在阈值内才允许市价平仓
-      const closeSideIsSell = position.positionAmt > 0;
-      const closeSidePrice = closeSideIsSell ? bidPrice : askPrice;
+      // 止损改为挂“做市”减仓单：按偏移价并强制 Post-Only
+      const closingSell = position.positionAmt > 0;
+      const priceDecimals = Math.max(0, Math.floor(Math.log10(1 / this.config.priceTick)));
+      // 依据方向选择带偏移的做市价格
+      const makerBuyPrice = bidPrice - this.config.bidOffset;
+      const makerSellPrice = askPrice + this.config.askOffset;
+      const targetPrice = closingSell ? makerSellPrice : makerBuyPrice;
+      const pxStr = formatPriceToString(targetPrice, priceDecimals);
+
       this.tradeLog.push(
         "stop",
-        `触发止损，方向=${position.positionAmt > 0 ? "多" : "空"} 当前亏损=${pnl.toFixed(4)} USDT`
+        `触发止损(做市减仓)：方向=${position.positionAmt > 0 ? "多→卖" : "空→买"} 价格=${pxStr}`
       );
       try {
         await this.flushOrders();
-        const side: "BUY" | "SELL" = position.positionAmt > 0 ? "SELL" : "BUY";
-        const priceDecimals = Math.max(0, Math.floor(Math.log10(1 / this.config.priceTick)));
-        const pxStr = formatPriceToString(closeSidePrice, priceDecimals);
+        const side: "BUY" | "SELL" = closingSell ? "SELL" : "BUY";
         await placeOrder(
           this.exchange,
           this.config.symbol,
@@ -494,10 +498,10 @@ export class MakerEngine {
           true,
           {
             markPrice: position.markPrice,
-            expectedPrice: Number(closeSidePrice),
+            expectedPrice: Number(targetPrice),
             maxPct: this.config.maxCloseSlippagePct,
           },
-          { priceTick: this.config.priceTick, qtyStep: 0.001, timeInForce: this.config.strictLimitOnly ? "IOC" : undefined }
+          { priceTick: this.config.priceTick, qtyStep: 0.001, timeInForce: "GTX" }
         );
       } catch (error) {
         if (isUnknownOrderError(error)) {

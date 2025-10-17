@@ -286,12 +286,10 @@ export class OffsetMakerEngine {
 
       if (absPosition < EPS) {
         this.entryPricePendingLogged = false;
-        if (!skipBuySide && canEnter) {
+        // Always place both-sided entry orders (fish-cage style), regardless of depth skips
+        if (canEnter) {
           const boost = Math.max(1, Number(this.config.volumeBoost ?? 1));
           desired.push({ side: "BUY", price: bidPrice, amount: this.config.tradeAmount * boost, reduceOnly: false });
-        }
-        if (!skipSellSide && canEnter) {
-          const boost = Math.max(1, Number(this.config.volumeBoost ?? 1));
           desired.push({ side: "SELL", price: askPrice, amount: this.config.tradeAmount * boost, reduceOnly: false });
         }
       } else {
@@ -564,27 +562,39 @@ export class OffsetMakerEngine {
     const triggerStop = shouldStopLoss(position, bidPrice, askPrice, this.config.lossLimit);
 
     if (triggerStop) {
+      // 在偏移价挂做市减仓单，强制 Post-Only
+      const closingSell = position.positionAmt > 0;
+      const priceDecimals = Math.max(0, Math.floor(Math.log10(1 / this.config.priceTick)));
+      const makerBuyPrice = bidPrice - this.config.bidOffset;
+      const makerSellPrice = askPrice + this.config.askOffset;
+      const targetPrice = closingSell ? makerSellPrice : makerBuyPrice;
+      const pxStr = formatPriceToString(targetPrice, priceDecimals);
+
       this.tradeLog.push(
         "stop",
-        `触发止损，方向=${position.positionAmt > 0 ? "多" : "空"} 当前亏损=${pnl.toFixed(4)} USDT`
+        `触发止损(做市减仓)：方向=${position.positionAmt > 0 ? "多→卖" : "空→买"} 价格=${pxStr}`
       );
       try {
         await this.flushOrders();
-        await marketClose(
+        const side: "BUY" | "SELL" = closingSell ? "SELL" : "BUY";
+        await placeOrder(
           this.exchange,
           this.config.symbol,
           this.openOrders,
           this.locks,
           this.timers,
           this.pending,
-          position.positionAmt > 0 ? "SELL" : "BUY",
+          side,
+          pxStr,
           absPosition,
           (type, detail) => this.tradeLog.push(type, detail),
+          true,
           {
             markPrice: position.markPrice,
-            expectedPrice: Number(position.positionAmt > 0 ? bidPrice : askPrice) || null,
+            expectedPrice: Number(targetPrice),
             maxPct: this.config.maxCloseSlippagePct,
-          }
+          },
+          { priceTick: this.config.priceTick, qtyStep: 0.001, timeInForce: "GTX" }
         );
       } catch (error) {
         if (isUnknownOrderError(error)) {
