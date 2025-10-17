@@ -101,9 +101,13 @@ export interface MakerConfig {
   maxLogEntries: number;
   maxCloseSlippagePct: number;
   priceTick: number;
+  qtyStep: number;
   // New: enforce limit-only execution and boost trade sizes
   strictLimitOnly: boolean;
   volumeBoost: number;
+  // Safety: automatically cover orphaned positions
+  orphanCoverEnabled: boolean;
+  orphanCoverIOC: boolean;
 }
 
 export const makerConfig: MakerConfig = {
@@ -119,6 +123,7 @@ export const makerConfig: MakerConfig = {
     0.05
   ),
   priceTick: parseNumber(process.env.MAKER_PRICE_TICK ?? process.env.PRICE_TICK, 0.1),
+  qtyStep: parseNumber(process.env.MAKER_QTY_STEP ?? process.env.QTY_STEP, 0.001),
   strictLimitOnly: parseBoolean(
     process.env.MAKER_STRICT_LIMIT_ONLY ?? process.env.STRICT_LIMIT_ONLY,
     false
@@ -126,6 +131,14 @@ export const makerConfig: MakerConfig = {
   volumeBoost: parseNumber(
     process.env.MAKER_VOLUME_BOOST_MULTIPLIER ?? process.env.VOLUME_BOOST_MULTIPLIER,
     1
+  ),
+  orphanCoverEnabled: parseBoolean(
+    process.env.MAKER_ORPHAN_COVER_ENABLED ?? process.env.ORPHAN_COVER_ENABLED,
+    true
+  ),
+  orphanCoverIOC: parseBoolean(
+    process.env.MAKER_ORPHAN_COVER_IOC ?? process.env.ORPHAN_COVER_IOC,
+    false
   ),
 };
 
