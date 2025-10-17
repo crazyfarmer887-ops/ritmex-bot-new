@@ -108,6 +108,8 @@ export interface MakerConfig {
   // Safety: automatically cover orphaned positions
   orphanCoverEnabled: boolean;
   orphanCoverIOC: boolean;
+  // Force guaranteed fills on exit by using market orders
+  forceMarketExit: boolean;
 }
 
 export const makerConfig: MakerConfig = {
@@ -138,6 +140,10 @@ export const makerConfig: MakerConfig = {
   ),
   orphanCoverIOC: parseBoolean(
     process.env.MAKER_ORPHAN_COVER_IOC ?? process.env.ORPHAN_COVER_IOC,
+    false
+  ),
+  forceMarketExit: parseBoolean(
+    process.env.MAKER_FORCE_MARKET_EXIT ?? process.env.FORCE_MARKET_EXIT,
     false
   ),
 };
