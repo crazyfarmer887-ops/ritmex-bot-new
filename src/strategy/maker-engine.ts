@@ -14,6 +14,7 @@ import { getPosition } from "../utils/strategy";
 import type { PositionSnapshot } from "../utils/strategy";
 import { computePositionPnl } from "../utils/pnl";
 import { getTopPrices, getMidOrLast } from "../utils/price";
+import { reconcileOrphanedPosition } from "../core/lib/position-reconciler";
 import { shouldStopLoss } from "../utils/risk";
 import {
   marketClose,
@@ -296,6 +297,27 @@ export class MakerEngine {
       const bidPrice = formatPriceToString(topBid - this.config.bidOffset, priceDecimals);
       const askPrice = formatPriceToString(topAsk + this.config.askOffset, priceDecimals);
       const position = getPosition(this.accountSnapshot, this.config.symbol);
+      // Safety: if we have a net position but no closing protection on book, place a reduce-only cover
+      if (this.config.orphanCoverEnabled) {
+        await reconcileOrphanedPosition({
+          exchange: this.exchange,
+          symbol: this.config.symbol,
+          position,
+          openOrders: this.openOrders,
+          locks: this.locks,
+          timers: this.timers,
+          pendings: this.pending,
+          prices: { topBid, topAsk, lastPrice: Number(this.tickerSnapshot?.lastPrice) || null },
+          opts: {
+            priceTick: this.config.priceTick,
+            qtyStep: this.config.qtyStep,
+            strictLimitOnly: this.config.strictLimitOnly,
+            maxCloseSlippagePct: this.config.maxCloseSlippagePct,
+          },
+          ioc: this.config.orphanCoverIOC,
+          log: (type, detail) => this.tradeLog.push(type, detail),
+        });
+      }
       const absPosition = Math.abs(position.positionAmt);
       const desired: DesiredOrder[] = [];
       const insufficientActive = this.applyInsufficientBalanceState(Date.now());
@@ -433,7 +455,7 @@ export class MakerEngine {
           },
           {
             priceTick: this.config.priceTick,
-            qtyStep: 0.001, // 默认数量步长
+            qtyStep: this.config.qtyStep,
             timeInForce: target.reduceOnly && this.config.strictLimitOnly ? "IOC" : undefined,
           }
         );
@@ -501,7 +523,7 @@ export class MakerEngine {
             expectedPrice: Number(targetPrice),
             maxPct: this.config.maxCloseSlippagePct,
           },
-          { priceTick: this.config.priceTick, qtyStep: 0.001, timeInForce: "GTX" }
+          { priceTick: this.config.priceTick, qtyStep: this.config.qtyStep, timeInForce: "GTX" }
         );
       } catch (error) {
         if (isUnknownOrderError(error)) {

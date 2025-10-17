@@ -15,6 +15,7 @@ import type { PositionSnapshot } from "../utils/strategy";
 import { computeDepthStats } from "../utils/depth";
 import { computePositionPnl } from "../utils/pnl";
 import { getTopPrices, getMidOrLast } from "../utils/price";
+import { reconcileOrphanedPosition } from "../core/lib/position-reconciler";
 import { shouldStopLoss } from "../utils/risk";
 import {
   marketClose,
@@ -262,6 +263,27 @@ export class OffsetMakerEngine {
       this.lastImbalance = imbalance;
 
       const position = getPosition(this.accountSnapshot, this.config.symbol);
+      // Safety: cover orphaned positions lacking protection orders
+      if (this.config.orphanCoverEnabled) {
+        await reconcileOrphanedPosition({
+          exchange: this.exchange,
+          symbol: this.config.symbol,
+          position,
+          openOrders: this.openOrders,
+          locks: this.locks,
+          timers: this.timers,
+          pendings: this.pending,
+          prices: { topBid, topAsk, lastPrice: Number(this.tickerSnapshot?.lastPrice) || null },
+          opts: {
+            priceTick: this.config.priceTick,
+            qtyStep: this.config.qtyStep ?? 0.001,
+            strictLimitOnly: this.config.strictLimitOnly,
+            maxCloseSlippagePct: this.config.maxCloseSlippagePct,
+          },
+          ioc: this.config.orphanCoverIOC ?? false,
+          log: (type, detail) => this.tradeLog.push(type, detail),
+        });
+      }
       const handledImbalance = await this.handleImbalanceExit(position, buySum, sellSum);
       if (handledImbalance) {
         this.emitUpdate();
@@ -530,7 +552,7 @@ export class OffsetMakerEngine {
           },
           {
             priceTick: this.config.priceTick,
-            qtyStep: 0.001, // 默认数量步长
+            qtyStep: this.config.qtyStep ?? 0.001,
             timeInForce: target.reduceOnly && this.config.strictLimitOnly ? "IOC" : undefined,
           }
         );
@@ -594,7 +616,7 @@ export class OffsetMakerEngine {
             expectedPrice: Number(targetPrice),
             maxPct: this.config.maxCloseSlippagePct,
           },
-          { priceTick: this.config.priceTick, qtyStep: 0.001, timeInForce: "GTX" }
+          { priceTick: this.config.priceTick, qtyStep: this.config.qtyStep ?? 0.001, timeInForce: "GTX" }
         );
       } catch (error) {
         if (isUnknownOrderError(error)) {
