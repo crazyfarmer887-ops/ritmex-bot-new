@@ -5,6 +5,12 @@ export function roundDownToTick(value: number, tick: number): number {
   return Number(scaled.toFixed(Math.max(0, decimalsOf(tick))));
 }
 
+export function roundUpToTick(value: number, tick: number): number {
+  if (!Number.isFinite(value) || !Number.isFinite(tick) || tick <= 0) return value;
+  const scaled = Math.ceil(value / tick) * tick;
+  return Number(scaled.toFixed(Math.max(0, decimalsOf(tick))));
+}
+
 export function roundQtyDownToStep(value: number, step: number): number {
   if (!Number.isFinite(value) || !Number.isFinite(step) || step <= 0) return value;
   const scaled = Math.floor(value / step) * step;

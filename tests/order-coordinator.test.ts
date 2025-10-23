@@ -108,7 +108,7 @@ describe("order-coordinator", () => {
     expect(pending.MARKET).toBe(String(baseOrder.orderId));
   });
 
-  it("places stop loss order only when valid", async () => {
+  it("places stop loss order only when valid (as stop-limit)", async () => {
     const adapter = createMockExchange();
     const locks: OrderLockMap = {};
     const timers: OrderTimerMap = {};
@@ -128,7 +128,7 @@ describe("order-coordinator", () => {
       log
     );
     expect(adapter.createOrder).toHaveBeenCalled();
-    expect(log).toHaveBeenCalledWith("stop", expect.stringContaining("STOP_MARKET"));
+    expect(log).toHaveBeenCalledWith("stop", expect.stringContaining("LIMIT"));
   });
 
   it("places trailing stop order", async () => {
