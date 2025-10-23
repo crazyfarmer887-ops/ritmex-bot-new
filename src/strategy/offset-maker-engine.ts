@@ -81,6 +81,11 @@ export class OffsetMakerEngine {
   private lastSkipSell = false;
   private lastImbalance: "balanced" | "buy_dominant" | "sell_dominant" = "balanced";
 
+  // Cooldown after position fully closes before allowing new entries
+  private postCloseCooldownUntil = 0;
+  private postCloseCooldownNotified = false;
+  private lastAbsPositionForCooldown = 0;
+
   // Reprice suppression for fast-ticking order book
   private readonly repriceDwellMs: number;
   private readonly minRepriceTicks: number;
@@ -142,6 +147,15 @@ export class OffsetMakerEngine {
           this.accountUnrealized = totalUnrealized;
         }
         const position = getPosition(snapshot, this.config.symbol);
+        // Detect transition from exposure to flat to start post-close cooldown
+        const absNow = Math.abs(position.positionAmt);
+        const wasExposed = this.lastAbsPositionForCooldown > EPS;
+        if (wasExposed && absNow <= EPS) {
+          this.postCloseCooldownUntil = Date.now() + 10_000;
+          this.postCloseCooldownNotified = false;
+          this.tradeLog.push("info", "平仓完成，暂停新开仓 10s");
+        }
+        this.lastAbsPositionForCooldown = absNow;
         this.sessionVolume.update(position, this.getReferencePrice());
         this.emitUpdate();
       },
@@ -288,7 +302,9 @@ export class OffsetMakerEngine {
       const askPrice = formatPriceToString(finalAsk + this.config.askOffset, priceDecimals);
       const absPosition = Math.abs(position.positionAmt);
       const desired: DesiredOrder[] = [];
-      const canEnter = !this.rateLimit.shouldBlockEntries();
+      const nowTs = Date.now();
+      const postCloseActive = this.applyPostCloseCooldownState(nowTs);
+      const canEnter = !this.rateLimit.shouldBlockEntries() && !postCloseActive;
 
       if (absPosition < EPS) {
         this.entryPricePendingLogged = false;
@@ -831,5 +847,17 @@ export class OffsetMakerEngine {
 
   private getReferencePrice(): number | null {
     return getMidOrLast(this.depthSnapshot, this.tickerSnapshot);
+  }
+
+  private applyPostCloseCooldownState(now: number): boolean {
+    const active = now < this.postCloseCooldownUntil;
+    if (!active && this.postCloseCooldownNotified) {
+      this.tradeLog.push("info", "平仓冷却结束，恢复开仓");
+      this.postCloseCooldownNotified = false;
+    }
+    if (active && !this.postCloseCooldownNotified) {
+      this.postCloseCooldownNotified = true;
+    }
+    return active;
   }
 }

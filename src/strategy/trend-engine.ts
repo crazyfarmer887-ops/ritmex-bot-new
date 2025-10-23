@@ -124,6 +124,10 @@ export class TrendEngine {
 
   private readonly listeners = new Map<TrendEngineEvent, Set<TrendEngineListener>>();
 
+  // Cooldown after position fully closes before allowing new entries
+  private postCloseCooldownUntil = 0;
+  private postCloseCooldownNotified = false;
+
   constructor(private readonly config: TradingConfig, private readonly exchange: ExchangeAdapter) {
     this.tradeLog = createTradeLog(this.config.maxLogEntries);
     this.rateLimit = new RateLimitController(this.config.pollIntervalMs, (type, detail) =>
@@ -168,6 +172,17 @@ export class TrendEngine {
         const position = getPosition(snapshot, this.config.symbol);
         const reference = this.getReferencePrice();
         this.sessionVolume.update(position, reference);
+        // Detect transition from exposure to flat to start post-close cooldown
+        const prev = this.lastAccountPosition;
+        const prevExposure = Math.abs(prev.positionAmt) > 1e-5;
+        const currentExposure = Math.abs(position.positionAmt) > 1e-5;
+        const signChanged =
+          prevExposure && currentExposure && Math.sign(prev.positionAmt) !== Math.sign(position.positionAmt);
+        if (prevExposure && (!currentExposure || signChanged)) {
+          this.postCloseCooldownUntil = Date.now() + 10_000;
+          this.postCloseCooldownNotified = false;
+          this.tradeLog.push("info", "平仓完成，暂停新开仓 10s");
+        }
         this.trackPositionLifecycle(position, reference);
         this.emitUpdate();
       },
@@ -339,7 +354,9 @@ export class TrendEngine {
       const position = getPosition(this.accountSnapshot, this.config.symbol);
 
       if (Math.abs(position.positionAmt) < 1e-5) {
-        if (!this.rateLimit.shouldBlockEntries()) {
+        const nowTs = Date.now();
+        const postCloseActive = this.applyPostCloseCooldownState(nowTs);
+        if (!this.rateLimit.shouldBlockEntries() && !postCloseActive) {
           await this.handleOpenPosition(price, sma30, bollingerBandwidth);
         }
       } else {
@@ -1004,6 +1021,18 @@ export class TrendEngine {
 
   private getReferencePrice(): number | null {
     return getMidOrLast(this.depthSnapshot, this.tickerSnapshot) ?? (this.lastPrice != null && Number.isFinite(this.lastPrice) ? this.lastPrice : null);
+  }
+
+  private applyPostCloseCooldownState(now: number): boolean {
+    const active = now < this.postCloseCooldownUntil;
+    if (!active && this.postCloseCooldownNotified) {
+      this.tradeLog.push("info", "平仓冷却结束，恢复开仓");
+      this.postCloseCooldownNotified = false;
+    }
+    if (active && !this.postCloseCooldownNotified) {
+      this.postCloseCooldownNotified = true;
+    }
+    return active;
   }
 
   private trackPositionLifecycle(position: PositionSnapshot, referencePrice: number | null): void {

@@ -147,6 +147,11 @@ export class GridEngine {
   private lastLimitAttemptAt = 0;
   static readonly LIMIT_COOLDOWN_MS = 3000;
 
+  // Cooldown after full position close before allowing new entries
+  private postCloseCooldownUntil = 0;
+  private postCloseCooldownNotified = false;
+  private lastAbsPositionForCooldown = 0;
+
   constructor(private readonly config: GridConfig, private readonly exchange: ExchangeAdapter, options: EngineOptions = {}) {
     this.tradeLog = createTradeLog(this.config.maxLogEntries);
     this.log = (type, detail) => this.tradeLog.push(type, detail);
@@ -229,7 +234,17 @@ export class GridEngine {
       this.exchange.watchAccount.bind(this.exchange),
       (snapshot) => {
         this.accountSnapshot = snapshot;
-        this.position = getPosition(snapshot, this.config.symbol);
+        const nextPosition = getPosition(snapshot, this.config.symbol);
+        // Detect transition from exposure to flat to start post-close cooldown
+        const absNow = Math.abs(nextPosition.positionAmt);
+        const wasExposed = this.lastAbsPositionForCooldown > EPSILON;
+        if (wasExposed && absNow <= EPSILON) {
+          this.postCloseCooldownUntil = this.now() + 10_000;
+          this.postCloseCooldownNotified = false;
+          this.log("info", "平仓完成，暂停新开仓 10s");
+        }
+        this.lastAbsPositionForCooldown = absNow;
+        this.position = nextPosition;
         this.accountVersion += 1;
         this.lastAbsPositionAmt = Math.abs(this.position.positionAmt);
         if (!this.feedArrived.account) {
@@ -367,6 +382,18 @@ export class GridEngine {
 
   private getReferencePrice(): number | null {
     return getMidOrLast(this.depthSnapshot, this.tickerSnapshot);
+  }
+
+  private applyPostCloseCooldownState(now: number): boolean {
+    const active = now < this.postCloseCooldownUntil;
+    if (!active && this.postCloseCooldownNotified) {
+      this.log("info", "平仓冷却结束，恢复开仓");
+      this.postCloseCooldownNotified = false;
+    }
+    if (active && !this.postCloseCooldownNotified) {
+      this.postCloseCooldownNotified = true;
+    }
+    return active;
   }
 
 
@@ -759,7 +786,8 @@ export class GridEngine {
 
     // ENTRY opens below price (BUY)
     for (const level of this.buyLevelIndices) {
-      if (hasNetLong || hasNetShort) {
+      const postCloseActive = this.applyPostCloseCooldownState(this.now());
+      if (hasNetLong || hasNetShort || postCloseActive) {
         // During exit-first, do not place any ENTRY orders
         continue;
       }
@@ -796,7 +824,8 @@ export class GridEngine {
 
     // ENTRY opens above price (SELL)
     for (const level of this.sellLevelIndices) {
-      if (hasNetLong || hasNetShort) {
+      const postCloseActive = this.applyPostCloseCooldownState(this.now());
+      if (hasNetLong || hasNetShort || postCloseActive) {
         // During exit-first, do not place any ENTRY orders
         continue;
       }

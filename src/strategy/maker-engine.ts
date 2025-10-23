@@ -110,6 +110,11 @@ export class MakerEngine {
   private lastDesiredSummary: string | null = null;
   private readonly rateLimit: RateLimitController;
 
+  // Cooldown after position fully closes before allowing new entries
+  private postCloseCooldownUntil = 0;
+  private postCloseCooldownNotified = false;
+  private lastAbsPositionForCooldown = 0;
+
   constructor(private readonly config: MakerConfig, private readonly exchange: ExchangeAdapter) {
     this.tradeLog = createTradeLog(this.config.maxLogEntries);
     this.rateLimit = new RateLimitController(this.config.refreshIntervalMs, (type, detail) =>
@@ -156,6 +161,15 @@ export class MakerEngine {
           this.accountUnrealized = totalUnrealized;
         }
         const position = getPosition(snapshot, this.config.symbol);
+        // Detect transition from exposure to flat to start post-close cooldown
+        const absNow = Math.abs(position.positionAmt);
+        const wasExposed = this.lastAbsPositionForCooldown > EPS;
+        if (wasExposed && absNow <= EPS) {
+          this.postCloseCooldownUntil = Date.now() + 10_000;
+          this.postCloseCooldownNotified = false;
+          this.tradeLog.push("info", "平仓完成，暂停新开仓 10s");
+        }
+        this.lastAbsPositionForCooldown = absNow;
         this.sessionVolume.update(position, this.getReferencePrice());
         if (!this.feedArrived.account) {
           this.tradeLog.push("info", "账户快照已同步");
@@ -299,8 +313,10 @@ export class MakerEngine {
       const position = getPosition(this.accountSnapshot, this.config.symbol);
       const absPosition = Math.abs(position.positionAmt);
       const desired: DesiredOrder[] = [];
-      const insufficientActive = this.applyInsufficientBalanceState(Date.now());
-      const canEnter = !this.rateLimit.shouldBlockEntries() && !insufficientActive;
+      const nowTs = Date.now();
+      const insufficientActive = this.applyInsufficientBalanceState(nowTs);
+      const postCloseActive = this.applyPostCloseCooldownState(nowTs);
+      const canEnter = !this.rateLimit.shouldBlockEntries() && !insufficientActive && !postCloseActive;
 
       if (absPosition < EPS) {
         this.entryPricePendingLogged = false;
@@ -802,6 +818,19 @@ export class MakerEngine {
       this.tradeLog.push("info", "余额检测恢复，重新尝试挂单");
       this.insufficientBalanceNotified = false;
       this.lastInsufficientMessage = null;
+    }
+    return active;
+  }
+
+  private applyPostCloseCooldownState(now: number): boolean {
+    const active = now < this.postCloseCooldownUntil;
+    if (!active && this.postCloseCooldownNotified) {
+      this.tradeLog.push("info", "平仓冷却结束，恢复开仓");
+      this.postCloseCooldownNotified = false;
+    }
+    if (active && !this.postCloseCooldownNotified) {
+      // mark notified to avoid repeated end logs later without a start
+      this.postCloseCooldownNotified = true;
     }
     return active;
   }
