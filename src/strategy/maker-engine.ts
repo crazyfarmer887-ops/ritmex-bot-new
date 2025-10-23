@@ -434,7 +434,8 @@ export class MakerEngine {
           {
             priceTick: this.config.priceTick,
             qtyStep: 0.001, // 默认数量步长
-            timeInForce: target.reduceOnly && this.config.strictLimitOnly ? "IOC" : undefined,
+            // For normal reduce-only closes, prefer maker (GTX default). Use IOC only in risk paths.
+            timeInForce: undefined,
           }
         );
       } catch (error) {
