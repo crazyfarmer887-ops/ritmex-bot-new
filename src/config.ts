@@ -104,14 +104,24 @@ export interface MakerConfig {
   // New: enforce limit-only execution and boost trade sizes
   strictLimitOnly: boolean;
   volumeBoost: number;
+  // OffsetMaker tuning: suppress frequent reprices and define min tick change
+  repriceDwellMs?: number;
+  minRepriceTicks?: number;
 }
 
 export const makerConfig: MakerConfig = {
   symbol: resolveSymbolFromEnv(),
   tradeAmount: parseNumber(process.env.TRADE_AMOUNT, 0.001),
   lossLimit: parseNumber(process.env.MAKER_LOSS_LIMIT, parseNumber(process.env.LOSS_LIMIT, 0.03)),
-  bidOffset: parseNumber(process.env.MAKER_BID_OFFSET, 0),
-  askOffset: parseNumber(process.env.MAKER_ASK_OFFSET, 0),
+  // Default offsets to 1 tick to keep quotes tight
+  bidOffset: parseNumber(
+    process.env.MAKER_BID_OFFSET,
+    parseNumber(process.env.MAKER_PRICE_TICK ?? process.env.PRICE_TICK, 0.1)
+  ),
+  askOffset: parseNumber(
+    process.env.MAKER_ASK_OFFSET,
+    parseNumber(process.env.MAKER_PRICE_TICK ?? process.env.PRICE_TICK, 0.1)
+  ),
   refreshIntervalMs: parseNumber(process.env.MAKER_REFRESH_INTERVAL_MS, 500),
   maxLogEntries: parseNumber(process.env.MAKER_MAX_LOG_ENTRIES, 200),
   maxCloseSlippagePct: parseNumber(
@@ -119,12 +129,26 @@ export const makerConfig: MakerConfig = {
     0.05
   ),
   priceTick: parseNumber(process.env.MAKER_PRICE_TICK ?? process.env.PRICE_TICK, 0.1),
+  // Enforce maker-only by default; override via env if needed
   strictLimitOnly: parseBoolean(
     process.env.MAKER_STRICT_LIMIT_ONLY ?? process.env.STRICT_LIMIT_ONLY,
-    false
+    true
   ),
   volumeBoost: parseNumber(
     process.env.MAKER_VOLUME_BOOST_MULTIPLIER ?? process.env.VOLUME_BOOST_MULTIPLIER,
+    1
+  ),
+  // OffsetMaker repricing controls (env overrides supported for both maker/offset-maker prefixes)
+  repriceDwellMs: parseNumber(
+    process.env.OFFSET_MAKER_REPRICE_DWELL_MS ??
+      process.env.MAKER_REPRICE_DWELL_MS ??
+      process.env.REPRICE_DWELL_MS,
+    1500
+  ),
+  minRepriceTicks: parseNumber(
+    process.env.OFFSET_MAKER_MIN_REPRICE_TICKS ??
+      process.env.MAKER_MIN_REPRICE_TICKS ??
+      process.env.MIN_REPRICE_TICKS,
     1
   ),
 };

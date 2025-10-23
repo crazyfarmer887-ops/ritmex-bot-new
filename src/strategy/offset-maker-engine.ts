@@ -80,9 +80,9 @@ export class OffsetMakerEngine {
   private lastSkipSell = false;
   private lastImbalance: "balanced" | "buy_dominant" | "sell_dominant" = "balanced";
 
-  // Reprice suppression for fast-ticking Lighter order book
+  // Reprice suppression for fast-ticking order book
   private readonly repriceDwellMs: number;
-  private readonly minRepriceTicks: number = 2;
+  private readonly minRepriceTicks: number;
   private lastEntryOrderBySide: Record<"BUY" | "SELL", { price: string; ts: number } | null> = {
     BUY: null,
     SELL: null,
@@ -93,8 +93,13 @@ export class OffsetMakerEngine {
     this.rateLimit = new RateLimitController(this.config.refreshIntervalMs, (type, detail) =>
       this.tradeLog.push(type, detail)
     );
-    // Debounce window defaults to 3x refresh interval, min 1s
-    this.repriceDwellMs = Math.max(1000, this.config.refreshIntervalMs * 3);
+    // Use configurable dwell window (default 1500ms) and min reprice ticks (default 1)
+    const cfgDwell = Number(this.config.repriceDwellMs);
+    this.repriceDwellMs = Number.isFinite(cfgDwell) && cfgDwell! > 0
+      ? cfgDwell!
+      : Math.max(1500, this.config.refreshIntervalMs * 3);
+    const cfgMinTicks = Number(this.config.minRepriceTicks);
+    this.minRepriceTicks = Number.isFinite(cfgMinTicks) && cfgMinTicks! > 0 ? cfgMinTicks! : 1;
     this.bootstrap();
   }
 
@@ -533,7 +538,8 @@ export class OffsetMakerEngine {
           {
             priceTick: this.config.priceTick,
             qtyStep: 0.001, // 默认数量步长
-            timeInForce: target.reduceOnly && this.config.strictLimitOnly ? "IOC" : undefined,
+            // Prefer maker for reduce-only closes under normal operation
+            timeInForce: undefined,
           }
         );
         // Record last placed entry order timing and price
