@@ -1,6 +1,6 @@
 import type { ExchangeAdapter } from "../exchanges/adapter";
 import type { AsterOrder, CreateOrderParams, TimeInForce } from "../exchanges/types";
-import { roundDownToTick, roundQtyDownToStep, formatPriceToString } from "../utils/math";
+import { roundDownToTick, roundQtyDownToStep, formatPriceToString, roundUpToTick } from "../utils/math";
 import { isUnknownOrderError } from "../utils/errors";
 import { isOrderPriceAllowedByMark } from "../utils/strategy";
 
@@ -234,8 +234,9 @@ export async function placeStopLossOrder(
   guard?: OrderGuardOptions,
   opts?: { priceTick: number; qtyStep: number }
 ): Promise<AsterOrder | undefined> {
-  const type = "STOP_MARKET";
-  if (isOperating(locks, type)) return;
+  // Use STOP_MARKET namespace for locks/dedupe, but create a stop-limit order underneath
+  const dedupeType = "STOP_MARKET";
+  if (isOperating(locks, dedupeType)) return;
   if (!enforceMarkPriceGuard(side, stopPrice, guard, log, "止损单")) return;
   if (lastPrice != null) {
     if (side === "SELL" && stopPrice >= lastPrice) {
@@ -250,31 +251,38 @@ export async function placeStopLossOrder(
   const priceTick = opts?.priceTick ?? 0.1;
   const qtyStep = opts?.qtyStep ?? 0.001;
 
+  // Compute stop-limit price with 1-tick offset relative to trigger
+  const trigger = roundDownToTick(stopPrice, priceTick);
+  const limitBase = side === "SELL" ? trigger - priceTick : trigger + priceTick;
+  const limitPrice = side === "SELL" ? roundDownToTick(limitBase, priceTick) : roundUpToTick(limitBase, priceTick);
+
   const params: CreateOrderParams = {
     symbol,
     side,
-    type,
+    // Create a stop-limit by sending LIMIT with a stopPrice
+    type: "LIMIT",
     quantity: roundQtyDownToStep(quantity, qtyStep),
-    stopPrice: roundDownToTick(stopPrice, priceTick),
-    // Always mark reduce-only semantics; some exchanges (e.g. Aster) ignore this on STOP
+    stopPrice: trigger,
+    price: limitPrice,
+    // Always mark reduce-only semantics; some exchanges (e.g. Aster) may ignore on STOP
     reduceOnly: "true",
     // Some exchanges prefer explicit close-position semantics; gateways will normalize
     closePosition: "true",
     timeInForce: "GTC",
-    // GRVT requires triggerType to match side semantics: BUY -> TAKE_PROFIT, SELL -> STOP_LOSS
+    // Hint for exchanges that require explicit trigger semantics
     triggerType: side === "BUY" ? "TAKE_PROFIT" : "STOP_LOSS",
   };
 
   // Avoid forcing price for STOP_MARKET globally; keep this exchange-specific in gateways
-  await deduplicateOrders(adapter, symbol, openOrders, locks, timers, pendings, type, side, log);
-  lockOperating(locks, timers, pendings, type, log);
+  await deduplicateOrders(adapter, symbol, openOrders, locks, timers, pendings, dedupeType, side, log);
+  lockOperating(locks, timers, pendings, dedupeType, log);
   try {
     const order = await adapter.createOrder(params);
-    pendings[type] = String(order.orderId);
-    log("stop", `挂止损单: ${side} STOP_MARKET @ ${params.stopPrice}`);
+    pendings[dedupeType] = String(order.orderId);
+    log("stop", `挂止损单: ${side} LIMIT @ ${params.price} stop=${params.stopPrice}`);
     return order;
   } catch (err) {
-    unlockOperating(locks, timers, pendings, type);
+    unlockOperating(locks, timers, pendings, dedupeType);
     if (isUnknownOrderError(err)) {
       log("order", "止损单已失效，跳过");
       return undefined;
