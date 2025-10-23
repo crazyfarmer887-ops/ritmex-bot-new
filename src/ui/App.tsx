@@ -8,6 +8,7 @@ import { BasisApp } from "./BasisApp";
 import { isBasisStrategyEnabled } from "../config";
 import { loadCopyrightFragments, verifyCopyrightIntegrity } from "../utils/copyright";
 import { resolveExchangeId } from "../exchanges/create-adapter";
+import { t } from "../utils/i18n";
 
 interface StrategyOption {
   id: "trend" | "maker" | "offset-maker" | "basis" | "grid";
@@ -92,22 +93,22 @@ export function App() {
     <Box flexDirection="column" paddingX={1} paddingY={1}>
       <Text color="gray">{copyright.bannerText}</Text>
       {integrityOk ? null : (
-        <Text color="red">警告: 版权校验失败，当前版本可能被篡改。</Text>
+        <Text color="red">{t("警告: 版权校验失败，当前版本可能被篡改。")}</Text>
       )}
       <Box height={1}>
         <Text color="gray">────────────────────────────────────────────────────</Text>
       </Box>
-      <Text color="cyanBright">请选择要运行的策略</Text>
-      <Text color="gray">使用 ↑/↓ 选择，回车开始，Ctrl+C 退出。</Text>
+      <Text color="cyanBright">{t("请选择要运行的策略")}</Text>
+      <Text color="gray">{t("使用 ↑/↓ 选择，回车开始，Ctrl+C 退出。")}</Text>
       <Box flexDirection="column" marginTop={1}>
         {strategies.map((strategy, index) => {
           const active = index === cursor;
           return (
             <Box key={strategy.id} flexDirection="column" marginBottom={1}>
               <Text color={active ? "greenBright" : undefined}>
-                {active ? "➤" : "  "} {strategy.label}
+                {active ? "➤" : "  "} {t(strategy.label)}
               </Text>
-              <Text color="gray">    {strategy.description}</Text>
+              <Text color="gray">    {t(strategy.description)}</Text>
             </Box>
           );
         })}
