@@ -116,8 +116,15 @@ export const makerConfig: MakerConfig = {
   symbol: resolveSymbolFromEnv(),
   tradeAmount: parseNumber(process.env.TRADE_AMOUNT, 0.001),
   lossLimit: parseNumber(process.env.MAKER_LOSS_LIMIT, parseNumber(process.env.LOSS_LIMIT, 0.03)),
-  bidOffset: parseNumber(process.env.MAKER_BID_OFFSET, 0),
-  askOffset: parseNumber(process.env.MAKER_ASK_OFFSET, 0),
+  // Default offsets to one tick to prefer resting (maker) quotes
+  bidOffset: parseNumber(
+    process.env.MAKER_BID_OFFSET ?? process.env.MAKER_PRICE_TICK ?? process.env.PRICE_TICK,
+    parseNumber(process.env.PRICE_TICK, 0.1)
+  ),
+  askOffset: parseNumber(
+    process.env.MAKER_ASK_OFFSET ?? process.env.MAKER_PRICE_TICK ?? process.env.PRICE_TICK,
+    parseNumber(process.env.PRICE_TICK, 0.1)
+  ),
   refreshIntervalMs: parseNumber(process.env.MAKER_REFRESH_INTERVAL_MS, 500),
   maxLogEntries: parseNumber(process.env.MAKER_MAX_LOG_ENTRIES, 200),
   maxCloseSlippagePct: parseNumber(
@@ -126,13 +133,14 @@ export const makerConfig: MakerConfig = {
   ),
   priceTick: parseNumber(process.env.MAKER_PRICE_TICK ?? process.env.PRICE_TICK, 0.1),
   qtyStep: parseNumber(process.env.MAKER_QTY_STEP ?? process.env.QTY_STEP, 0.001),
+  // Enforce limit-only by default to secure maker rebates
   strictLimitOnly: parseBoolean(
     process.env.MAKER_STRICT_LIMIT_ONLY ?? process.env.STRICT_LIMIT_ONLY,
-    false
+    true
   ),
   volumeBoost: parseNumber(
     process.env.MAKER_VOLUME_BOOST_MULTIPLIER ?? process.env.VOLUME_BOOST_MULTIPLIER,
-    1
+    2
   ),
   orphanCoverEnabled: parseBoolean(
     process.env.MAKER_ORPHAN_COVER_ENABLED ?? process.env.ORPHAN_COVER_ENABLED,

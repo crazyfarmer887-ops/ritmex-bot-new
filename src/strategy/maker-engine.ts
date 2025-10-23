@@ -405,7 +405,7 @@ export class MakerEngine {
       const status = (order.status ?? "").toUpperCase();
       return !status.includes("CLOSED") && !status.includes("FILLED") && !status.includes("CANCELED");
     });
-    const { toCancel, toPlace } = makeOrderPlan(openOrders, targets);
+      const { toCancel, toPlace } = makeOrderPlan(openOrders, targets);
 
     for (const order of toCancel) {
       if (this.pendingCancelOrders.has(String(order.orderId))) continue;
@@ -456,7 +456,8 @@ export class MakerEngine {
           {
             priceTick: this.config.priceTick,
             qtyStep: this.config.qtyStep,
-            timeInForce: target.reduceOnly && this.config.strictLimitOnly ? "IOC" : undefined,
+            // Enforce Post-Only for all maker quotes when strictLimitOnly to maximize rebates
+            timeInForce: this.config.strictLimitOnly ? "GTX" : undefined,
           }
         );
       } catch (error) {

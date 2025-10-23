@@ -83,7 +83,7 @@ export class OffsetMakerEngine {
 
   // Reprice suppression for fast-ticking Lighter order book
   private readonly repriceDwellMs: number;
-  private readonly minRepriceTicks: number = 2;
+  private readonly minRepriceTicks: number = 1;
   private lastEntryOrderBySide: Record<"BUY" | "SELL", { price: string; ts: number } | null> = {
     BUY: null,
     SELL: null,
@@ -94,8 +94,8 @@ export class OffsetMakerEngine {
     this.rateLimit = new RateLimitController(this.config.refreshIntervalMs, (type, detail) =>
       this.tradeLog.push(type, detail)
     );
-    // Debounce window defaults to 3x refresh interval, min 1s
-    this.repriceDwellMs = Math.max(1000, this.config.refreshIntervalMs * 3);
+    // Debounce window defaults to max(1500ms, 3x refresh interval)
+    this.repriceDwellMs = Math.max(1500, this.config.refreshIntervalMs * 3);
     this.bootstrap();
   }
 
@@ -553,7 +553,8 @@ export class OffsetMakerEngine {
           {
             priceTick: this.config.priceTick,
             qtyStep: this.config.qtyStep ?? 0.001,
-            timeInForce: target.reduceOnly && this.config.strictLimitOnly ? "IOC" : undefined,
+            // Enforce Post-Only for all maker quotes when strictLimitOnly to maximize rebates
+            timeInForce: this.config.strictLimitOnly ? "GTX" : undefined,
           }
         );
         // Record last placed entry order timing and price
