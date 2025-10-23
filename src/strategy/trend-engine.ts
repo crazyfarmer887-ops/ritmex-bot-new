@@ -979,7 +979,14 @@ export class TrendEngine {
       : price < sma30
       ? "做空"
       : "无信号";
-    const pnl = price != null ? computePositionPnl(position, price, price) : 0;
+    // Prefer mark or mid/last to reduce bid/ask skew in displayed PnL
+    const priceForPnl =
+      (Number.isFinite(Number(position.markPrice)) && Number(position.markPrice) > 0
+        ? Number(position.markPrice)
+        : null) ?? getMidOrLast(this.depthSnapshot, this.tickerSnapshot) ?? price;
+    const pnl = Number.isFinite(Number(priceForPnl)) && priceForPnl != null
+      ? computePositionPnl(position, Number(priceForPnl), Number(priceForPnl))
+      : 0;
     return {
       ready: this.isReady(),
       symbol: this.config.symbol,

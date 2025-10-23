@@ -54,8 +54,8 @@ export function MakerApp({ onExit }: MakerAppProps) {
   if (error) {
     return (
       <Box flexDirection="column" padding={1}>
-        <Text color="red">启动失败: {error.message}</Text>
-        <Text color="gray">请检查环境变量和网络连通性。</Text>
+        <Text color="red">실행 실패: {error.message}</Text>
+        <Text color="gray">환경 변수와 네트워크 연결을 확인하세요.</Text>
       </Box>
     );
   }
@@ -63,7 +63,7 @@ export function MakerApp({ onExit }: MakerAppProps) {
   if (!snapshot) {
     return (
       <Box padding={1}>
-        <Text>正在初始化做市策略…</Text>
+        <Text>메이커 전략 초기화 중…</Text>
       </Box>
     );
   }
@@ -84,12 +84,12 @@ export function MakerApp({ onExit }: MakerAppProps) {
   }));
   const openOrderColumns: TableColumn[] = [
     { key: "id", header: "ID", align: "right", minWidth: 6 },
-    { key: "side", header: "Side", minWidth: 4 },
-    { key: "price", header: "Price", align: "right", minWidth: 10 },
-    { key: "qty", header: "Qty", align: "right", minWidth: 8 },
-    { key: "filled", header: "Filled", align: "right", minWidth: 8 },
+    { key: "side", header: "방향", minWidth: 4 },
+    { key: "price", header: "가격", align: "right", minWidth: 10 },
+    { key: "qty", header: "수량", align: "right", minWidth: 8 },
+    { key: "filled", header: "체결", align: "right", minWidth: 8 },
     { key: "reduceOnly", header: "RO", minWidth: 4 },
-    { key: "status", header: "Status", minWidth: 10 },
+    { key: "status", header: "상태", minWidth: 10 },
   ];
 
   const desiredRows = snapshot.desiredOrders.map((order, index) => ({
@@ -101,31 +101,31 @@ export function MakerApp({ onExit }: MakerAppProps) {
   }));
   const desiredColumns: TableColumn[] = [
     { key: "index", header: "#", align: "right", minWidth: 2 },
-    { key: "side", header: "Side", minWidth: 4 },
-    { key: "price", header: "Price", align: "right", minWidth: 10 },
-    { key: "amount", header: "Qty", align: "right", minWidth: 8 },
+    { key: "side", header: "방향", minWidth: 4 },
+    { key: "price", header: "가격", align: "right", minWidth: 10 },
+    { key: "amount", header: "수량", align: "right", minWidth: 8 },
     { key: "reduceOnly", header: "RO", minWidth: 4 },
   ];
 
   const lastLogs = snapshot.tradeLog.slice(-5);
   const feedStatus = snapshot.feedStatus;
   const feedEntries: Array<{ key: keyof typeof feedStatus; label: string }> = [
-    { key: "account", label: "账户" },
-    { key: "orders", label: "订单" },
-    { key: "depth", label: "深度" },
-    { key: "ticker", label: "Ticker" },
+    { key: "account", label: "계정" },
+    { key: "orders", label: "주문" },
+    { key: "depth", label: "호가" },
+    { key: "ticker", label: "티커" },
   ];
 
   return (
     <Box flexDirection="column" paddingX={1}>
       <Box flexDirection="column" marginBottom={1}>
-        <Text color="cyanBright">Maker Strategy Dashboard</Text>
+        <Text color="cyanBright">메이커 전략 대시보드</Text>
         <Text>
-          交易所: {exchangeName} ｜ 交易对: {snapshot.symbol} ｜ 买一价: {formatNumber(topBid, 2)} ｜ 卖一价: {formatNumber(topAsk, 2)} ｜ 点差: {spreadDisplay}
+          거래소: {exchangeName} | 심볼: {snapshot.symbol} | 매수호가: {formatNumber(topBid, 2)} | 매도호가: {formatNumber(topAsk, 2)} | 스프레드: {spreadDisplay}
         </Text>
-        <Text color="gray">状态: {snapshot.ready ? "实时运行" : "等待市场数据"} ｜ 按 Esc 返回策略选择</Text>
+        <Text color="gray">상태: {snapshot.ready ? "실시간" : "시세 대기"} | Esc: 뒤로</Text>
         <Text>
-          数据状态:
+          데이터 상태:
           {feedEntries.map((entry, index) => (
             <Text key={entry.key} color={feedStatus[entry.key] ? "green" : "red"}>
               {index === 0 ? " " : " "}
@@ -137,44 +137,44 @@ export function MakerApp({ onExit }: MakerAppProps) {
 
       <Box flexDirection="row" marginBottom={1}>
         <Box flexDirection="column" marginRight={4}>
-          <Text color="greenBright">持仓</Text>
+          <Text color="greenBright">포지션</Text>
           {hasPosition ? (
             <>
               <Text>
-                方向: {snapshot.position.positionAmt > 0 ? "多" : "空"} ｜ 数量: {formatNumber(Math.abs(snapshot.position.positionAmt), 4)} ｜ 开仓价: {formatNumber(snapshot.position.entryPrice, 2)}
+                방향: {snapshot.position.positionAmt > 0 ? "롱" : "숏"} | 수량: {formatNumber(Math.abs(snapshot.position.positionAmt), 4)} | 진입가: {formatNumber(snapshot.position.entryPrice, 2)}
               </Text>
               <Text>
-                浮动盈亏: {formatNumber(snapshot.pnl, 4)} USDT ｜ 账户未实现盈亏: {formatNumber(snapshot.accountUnrealized, 4)} USDT
+                평가손익: {formatNumber(snapshot.pnl, 4)} USDT | 계정 미실현손익: {formatNumber(snapshot.accountUnrealized, 4)} USDT
               </Text>
             </>
           ) : (
-            <Text color="gray">当前无持仓</Text>
+            <Text color="gray">현재 포지션 없음</Text>
           )}
         </Box>
         <Box flexDirection="column">
-          <Text color="greenBright">目标挂单</Text>
+          <Text color="greenBright">목표 주문</Text>
           {desiredRows.length > 0 ? (
             <DataTable columns={desiredColumns} rows={desiredRows} />
           ) : (
-            <Text color="gray">暂无目标挂单</Text>
+            <Text color="gray">목표 주문 없음</Text>
           )}
           <Text>
-            累计成交量: {formatNumber(snapshot.sessionVolume, 2)} USDT
+            누적 체결 대금: {formatNumber(snapshot.sessionVolume, 2)} USDT
           </Text>
         </Box>
       </Box>
 
       <Box flexDirection="column" marginBottom={1}>
-        <Text color="yellow">当前挂单</Text>
+        <Text color="yellow">현재 주문</Text>
         {openOrderRows.length > 0 ? (
           <DataTable columns={openOrderColumns} rows={openOrderRows} />
         ) : (
-          <Text color="gray">暂无挂单</Text>
+          <Text color="gray">주문 없음</Text>
         )}
       </Box>
 
       <Box flexDirection="column">
-        <Text color="yellow">最近事件</Text>
+        <Text color="yellow">최근 이벤트</Text>
         {lastLogs.length > 0 ? (
           lastLogs.map((item, index) => (
             <Text key={`${item.time}-${index}`}>
@@ -182,7 +182,7 @@ export function MakerApp({ onExit }: MakerAppProps) {
             </Text>
           ))
         ) : (
-          <Text color="gray">暂无日志</Text>
+          <Text color="gray">로그 없음</Text>
         )}
       </Box>
     </Box>

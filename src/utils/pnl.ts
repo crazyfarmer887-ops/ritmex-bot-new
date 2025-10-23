@@ -5,7 +5,14 @@ export function computePositionPnl(
   bestBid?: number | null,
   bestAsk?: number | null
 ): number {
-  const priceForPnl = position.positionAmt > 0 ? bestBid : bestAsk;
+  // If both prices are provided and equal (e.g., mid/last passed for both), use that price directly.
+  // Otherwise, fall back to side-aware bid/ask selection.
+  let priceForPnl: number | null | undefined;
+  if (Number.isFinite(bestBid) && Number.isFinite(bestAsk) && bestBid === bestAsk) {
+    priceForPnl = bestBid as number;
+  } else {
+    priceForPnl = position.positionAmt > 0 ? bestBid : bestAsk;
+  }
   if (!Number.isFinite(priceForPnl as number)) return 0;
   const absAmt = Math.abs(position.positionAmt);
   return position.positionAmt > 0
