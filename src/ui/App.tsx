@@ -19,26 +19,26 @@ interface StrategyOption {
 const BASE_STRATEGIES: StrategyOption[] = [
   {
     id: "trend",
-    label: "趋势跟随策略 (SMA30)",
-    description: "监控均线信号，自动进出场并维护止损/止盈",
+    label: "트렌드 전략 (SMA30)",
+    description: "이동평균 신호를 감시하여 자동 진입·청산 및 리스크 관리",
     component: TrendApp,
   },
   {
     id: "maker",
-    label: "做市刷单策略",
-    description: "双边挂单提供流动性，自动追价与风控止损",
+    label: "메이커 전략",
+    description: "양방향 지정가로 유동성 제공, 자동 추격/리스크 관리",
     component: MakerApp,
   },
   {
     id: "grid",
-    label: "基础网格策略",
-    description: "在上下边界之间布设等比网格，自动加仓与减仓",
+    label: "그리드 전략",
+    description: "상·하단 사이에 기하 그리드를 배치, 자동 증감포",
     component: GridApp,
   },
   {
     id: "offset-maker",
-    label: "偏移做市策略",
-    description: "根据盘口深度自动偏移挂单并在极端不平衡时撤退",
+    label: "오프셋 메이커",
+    description: "호가 깊이에 따라 자동으로 오더 오프셋/불균형 시 철수",
     component: OffsetMakerApp,
   },
 ];
@@ -59,8 +59,8 @@ export function App() {
       ...BASE_STRATEGIES,
       {
         id: "basis" as const,
-        label: "期现套利策略",
-        description: "监控期货与现货盘口差价，辅助发现套利机会",
+        label: "베이시스 차익",
+        description: "선물·현물 호가 차이를 모니터링하여 기회 탐지",
         component: BasisApp,
       },
     ];
@@ -92,20 +92,20 @@ export function App() {
     <Box flexDirection="column" paddingX={1} paddingY={1}>
       <Text color="gray">{copyright.bannerText}</Text>
       {integrityOk ? null : (
-        <Text color="red">警告: 版权校验失败，当前版本可能被篡改。</Text>
+        <Text color="red">경고: 저작권 검증 실패, 변조 가능성이 있습니다.</Text>
       )}
       <Box height={1}>
         <Text color="gray">────────────────────────────────────────────────────</Text>
       </Box>
-      <Text color="cyanBright">请选择要运行的策略</Text>
-      <Text color="gray">使用 ↑/↓ 选择，回车开始，Ctrl+C 退出。</Text>
+      <Text color="cyanBright">실행할 전략을 선택하세요</Text>
+      <Text color="gray">↑/↓ 선택, Enter 시작, Ctrl+C 종료</Text>
       <Box flexDirection="column" marginTop={1}>
         {strategies.map((strategy, index) => {
           const active = index === cursor;
           return (
             <Box key={strategy.id} flexDirection="column" marginBottom={1}>
               <Text color={active ? "greenBright" : undefined}>
-                {active ? "➤" : "  "} {strategy.label}
+                {active ? ">" : "  "} {strategy.label}
               </Text>
               <Text color="gray">    {strategy.description}</Text>
             </Box>

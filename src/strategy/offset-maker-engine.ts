@@ -644,7 +644,14 @@ export class OffsetMakerEngine {
     const position = getPosition(this.accountSnapshot, this.config.symbol);
     const { topBid, topAsk } = getTopPrices(this.depthSnapshot);
     const spread = topBid != null && topAsk != null ? topAsk - topBid : null;
-    const pnl = computePositionPnl(position, topBid, topAsk);
+    // Prefer mark or mid/last for smoother displayed PnL
+    const priceForPnl =
+      (Number.isFinite(Number(position.markPrice)) && Number(position.markPrice) > 0
+        ? Number(position.markPrice)
+        : null) ?? getMidOrLast(this.depthSnapshot, this.tickerSnapshot);
+    const pnl = Number.isFinite(Number(priceForPnl)) && priceForPnl != null
+      ? computePositionPnl(position, Number(priceForPnl), Number(priceForPnl))
+      : 0;
 
     return {
       ready: this.isReady(),

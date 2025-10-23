@@ -4,5 +4,13 @@ export function formatNumber(value: number | null | undefined, digits = 4, fallb
 }
 
 export function formatTrendLabel(trend: "做多" | "做空" | "无信号"): string {
-  return trend;
+  switch (trend) {
+    case "做多":
+      return "롱";
+    case "做空":
+      return "숏";
+    case "无信号":
+    default:
+      return "무신호";
+  }
 }

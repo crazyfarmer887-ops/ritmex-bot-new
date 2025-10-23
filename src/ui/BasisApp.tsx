@@ -31,7 +31,7 @@ export function BasisApp({ onExit }: BasisAppProps) {
 
   useEffect(() => {
     if (exchangeId !== "aster") {
-      setError(new Error("期现套利策略目前仅支持 Aster 交易所。请设置 EXCHANGE=aster 后重试。"));
+      setError(new Error("베이시스 차익은 현재 Aster 거래소만 지원합니다. EXCHANGE=aster 로 설정 후 다시 시도하세요."));
       return;
     }
     try {
@@ -57,8 +57,8 @@ export function BasisApp({ onExit }: BasisAppProps) {
   if (error) {
     return (
       <Box flexDirection="column" padding={1}>
-        <Text color="red">无法启动期现套利策略: {error.message}</Text>
-        <Text color="gray">按 Esc 返回菜单。</Text>
+        <Text color="red">기초-선물 차익 대시보드를 시작할 수 없습니다: {error.message}</Text>
+        <Text color="gray">Esc: 뒤로</Text>
       </Box>
     );
   }
@@ -66,7 +66,7 @@ export function BasisApp({ onExit }: BasisAppProps) {
   if (!snapshot) {
     return (
       <Box padding={1}>
-        <Text>正在初始化期现套利监控…</Text>
+        <Text>차익 모니터 초기화 중…</Text>
       </Box>
     );
   }
@@ -88,7 +88,7 @@ export function BasisApp({ onExit }: BasisAppProps) {
   const fundingIncomePerFunding = snapshot.fundingIncomePerFunding != null ? `${formatNumber(snapshot.fundingIncomePerFunding, 4)} USDT` : "-";
   const fundingIncomePerDay = snapshot.fundingIncomePerDay != null ? `${formatNumber(snapshot.fundingIncomePerDay, 4)} USDT` : "-";
   const takerFeesPerRoundTrip = snapshot.takerFeesPerRoundTrip != null ? `${formatNumber(snapshot.takerFeesPerRoundTrip, 4)} USDT` : "-";
-  const fundingCountToBreakeven = snapshot.fundingCountToBreakeven != null ? `${formatNumber(snapshot.fundingCountToBreakeven, 2)} 次` : "-";
+  const fundingCountToBreakeven = snapshot.fundingCountToBreakeven != null ? `${formatNumber(snapshot.fundingCountToBreakeven, 2)} 회` : "-";
   const feedStatus = snapshot.feedStatus;
   const lastLogs = snapshot.tradeLog.slice(-5);
   const spotBalances = (snapshot.spotBalances ?? []).filter((b) => Math.abs(b.free) > 0 || Math.abs(b.locked) > 0);
@@ -97,72 +97,72 @@ export function BasisApp({ onExit }: BasisAppProps) {
   return (
     <Box flexDirection="column" paddingX={1}>
       <Box flexDirection="column" marginBottom={1}>
-        <Text color="cyanBright">Basis Arbitrage Dashboard</Text>
+        <Text color="cyanBright">베이시스 차익 대시보드</Text>
         <Text>
-          交易所: {exchangeName} ｜ 期货合约: {snapshot.futuresSymbol} ｜ 现货交易对: {snapshot.spotSymbol}
+          거래소: {exchangeName} | 선물: {snapshot.futuresSymbol} | 현물: {snapshot.spotSymbol}
         </Text>
-        <Text color="gray">按 Esc 返回策略选择 ｜ 数据状态: 期货({feedStatus.futures ? "OK" : "--"}) 现货({feedStatus.spot ? "OK" : "--"}) 资金费率({feedStatus.funding ? "OK" : "--"})</Text>
-        <Text color="gray">最近更新时间: {lastUpdated}</Text>
+        <Text color="gray">Esc: 뒤로 | 데이터: 선물({feedStatus.futures ? "OK" : "--"}) 현물({feedStatus.spot ? "OK" : "--"}) 펀딩({feedStatus.funding ? "OK" : "--"})</Text>
+        <Text color="gray">업데이트: {lastUpdated}</Text>
       </Box>
 
       <Box flexDirection="row" marginBottom={1}>
         <Box flexDirection="column" marginRight={4}>
-          <Text color="greenBright">期货盘口</Text>
-          <Text>买一: {futuresBid} ｜ 卖一: {futuresAsk}</Text>
-          <Text color="gray">更新时间: {futuresUpdated}</Text>
+          <Text color="greenBright">선물 호가</Text>
+          <Text>매수: {futuresBid} | 매도: {futuresAsk}</Text>
+          <Text color="gray">업데이트: {futuresUpdated}</Text>
         </Box>
         <Box flexDirection="column">
-          <Text color="greenBright">现货盘口</Text>
-          <Text>买一: {spotBid} ｜ 卖一: {spotAsk}</Text>
-          <Text color="gray">更新时间: {spotUpdated}</Text>
+          <Text color="greenBright">현물 호가</Text>
+          <Text>매수: {spotBid} | 매도: {spotAsk}</Text>
+          <Text color="gray">업데이트: {spotUpdated}</Text>
         </Box>
       </Box>
 
       <Box flexDirection="column" marginBottom={1}>
-        <Text color="yellow">资金费率</Text>
-        <Text>当前资金费率: {fundingRatePct}</Text>
-        <Text color="gray">资金费率更新时间: {fundingUpdated} ｜ 下次结算时间: {nextFundingTime}</Text>
-        <Text>单次资金费率收益(估): {fundingIncomePerFunding} ｜ 日收益(估): {fundingIncomePerDay}</Text>
-        <Text>双边吃单手续费(估): {takerFeesPerRoundTrip} ｜ 回本所需资金费率次数: {fundingCountToBreakeven}</Text>
+        <Text color="yellow">펀딩</Text>
+        <Text>현재 펀딩율: {fundingRatePct}</Text>
+        <Text color="gray">업데이트: {fundingUpdated} | 다음 산정: {nextFundingTime}</Text>
+        <Text>1회 펀딩 수익(추정): {fundingIncomePerFunding} | 일간(추정): {fundingIncomePerDay}</Text>
+        <Text>양측 테이커 수수료(추정): {takerFeesPerRoundTrip} | 손익분기 펀딩 횟수: {fundingCountToBreakeven}</Text>
       </Box>
 
       <Box flexDirection="row" marginBottom={1}>
         <Box flexDirection="column" marginRight={4}>
-          <Text color="cyan">现货账户余额（非0）</Text>
+          <Text color="cyan">현물 잔고(0 제외)</Text>
           {spotBalances.length ? (
             spotBalances.map((b) => (
               <Text key={`spot-${b.asset}`}>
-                {b.asset}: 可用 {formatNumber(b.free, 8)} ｜ 冻结 {formatNumber(b.locked, 8)}
+                {b.asset}: 가용 {formatNumber(b.free, 8)} | 동결 {formatNumber(b.locked, 8)}
               </Text>
             ))
           ) : (
-            <Text color="gray">无</Text>
+            <Text color="gray">없음</Text>
           )}
         </Box>
         <Box flexDirection="column">
-          <Text color="cyan">合约账户余额（非0）</Text>
+          <Text color="cyan">선물 잔고(0 제외)</Text>
           {futuresBalances.length ? (
             futuresBalances.map((b) => (
               <Text key={`fut-${b.asset}`}>
-                {b.asset}: 钱包 {formatNumber(b.wallet, 8)} ｜ 可用 {formatNumber(b.available, 8)}
+                {b.asset}: 지갑 {formatNumber(b.wallet, 8)} | 가용 {formatNumber(b.available, 8)}
               </Text>
             ))
           ) : (
-            <Text color="gray">无</Text>
+            <Text color="gray">없음</Text>
           )}
         </Box>
       </Box>
 
       <Box flexDirection="column" marginBottom={1}>
-        <Text color={snapshot.opportunity ? "greenBright" : "redBright"}>套利差价（卖期货 / 买现货）</Text>
-        <Text color={snapshot.opportunity ? "green" : undefined}>毛价差: {spread} USDT ｜ {spreadBps} bp</Text>
+        <Text color={snapshot.opportunity ? "greenBright" : "redBright"}>차익(선물 매도 / 현물 매수)</Text>
+        <Text color={snapshot.opportunity ? "green" : undefined}>스프레드(총): {spread} USDT | {spreadBps} bp</Text>
         <Text color={snapshot.opportunity ? "green" : "red"}>
-          扣除 taker 手续费 ({(basisConfig.takerFeeRate * 100).toFixed(4)}% × 双边): {netSpread} USDT ｜ {netSpreadBps} bp
+          테이커 수수료 차감 ({(basisConfig.takerFeeRate * 100).toFixed(4)}% × 양쪽): {netSpread} USDT | {netSpreadBps} bp
         </Text>
       </Box>
 
       <Box flexDirection="column">
-        <Text color="yellow">最近事件</Text>
+        <Text color="yellow">최근 이벤트</Text>
         {lastLogs.length ? (
           lastLogs.map((entry, index) => {
             const color = entry.type === "entry" ? "green" : entry.type === "exit" ? "red" : undefined;
@@ -173,7 +173,7 @@ export function BasisApp({ onExit }: BasisAppProps) {
             );
           })
         ) : (
-          <Text color="gray">暂无日志</Text>
+          <Text color="gray">로그 없음</Text>
         )}
       </Box>
     </Box>
