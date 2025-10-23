@@ -10,7 +10,7 @@ import type {
 import { formatPriceToString } from "../utils/math";
 import { createTradeLog, type TradeLogEntry } from "../logging/trade-log";
 import { extractMessage, isInsufficientBalanceError, isUnknownOrderError, isRateLimitError } from "../utils/errors";
-import { getPosition } from "../utils/strategy";
+import { getPosition, calcStopLossPrice } from "../utils/strategy";
 import type { PositionSnapshot } from "../utils/strategy";
 import { computePositionPnl } from "../utils/pnl";
 import { getTopPrices, getMidOrLast } from "../utils/price";
@@ -18,6 +18,7 @@ import { shouldStopLoss } from "../utils/risk";
 import {
   marketClose,
   placeOrder,
+  placeStopLossOrder,
   unlockOperating,
 } from "../core/order-coordinator";
 import type { OrderLockMap, OrderPendingMap, OrderTimerMap } from "../core/order-coordinator";
@@ -318,6 +319,11 @@ export class MakerEngine {
       this.logDesiredOrders(desired);
       this.sessionVolume.update(position, this.getReferencePrice());
       await this.syncOrders(desired);
+      // Ensure a protective stop exists during cancel/replace gaps
+      const closeSidePx = position.positionAmt > 0 ? Number(closeBidPrice) : Number(closeAskPrice);
+      if (Number.isFinite(closeSidePx)) {
+        await this.ensureProtectiveStop(position, Number(closeSidePx));
+      }
       await this.checkRisk(position, Number(closeBidPrice), Number(closeAskPrice));
       this.emitUpdate();
     } catch (error) {
@@ -381,7 +387,17 @@ export class MakerEngine {
     const availableOrders = this.openOrders.filter((o) => !this.pendingCancelOrders.has(String(o.orderId)));
     const openOrders = availableOrders.filter((order) => {
       const status = (order.status ?? "").toUpperCase();
-      return !status.includes("CLOSED") && !status.includes("FILLED") && !status.includes("CANCELED");
+      const isStopLike = Number.isFinite(Number(order.stopPrice)) && Number(order.stopPrice) > 0;
+      const type = String(order.type ?? "").toUpperCase();
+      const isStopType = type.includes("STOP");
+      // Exclude stop/stop-like orders from the maker quote plan
+      return (
+        !status.includes("CLOSED") &&
+        !status.includes("FILLED") &&
+        !status.includes("CANCELED") &&
+        !isStopLike &&
+        !isStopType
+      );
     });
     const { toCancel, toPlace } = makeOrderPlan(openOrders, targets);
 
@@ -533,6 +549,151 @@ export class MakerEngine {
           this.openOrders = this.openOrders.filter((existing) => existing.orderId !== order.orderId);
         }
       );
+    }
+  }
+
+  private findCurrentStop(stopSide: "BUY" | "SELL"): AsterOrder | undefined {
+    return this.openOrders.find((o) => {
+      const hasStopPrice = Number.isFinite(Number(o.stopPrice)) && Number(o.stopPrice) > 0;
+      const type = String(o.type ?? "").toUpperCase();
+      const isStopType = type === "STOP_MARKET" || type === "TRAILING_STOP_MARKET";
+      return o.side === stopSide && (isStopType || hasStopPrice);
+    });
+  }
+
+  private async ensureProtectiveStop(position: PositionSnapshot, lastPrice: number): Promise<void> {
+    const absPosition = Math.abs(position.positionAmt);
+    if (absPosition < 1e-5) return;
+    const hasEntry = Number.isFinite(position.entryPrice) && Math.abs(position.entryPrice) > 1e-8;
+    if (!hasEntry) return;
+    const direction: "long" | "short" = position.positionAmt > 0 ? "long" : "short";
+    const stopSide: "BUY" | "SELL" = direction === "long" ? "SELL" : "BUY";
+    const rawStop = calcStopLossPrice(position.entryPrice, absPosition, direction, this.config.lossLimit);
+    const tick = Math.max(1e-9, this.config.priceTick);
+    // SELL stop must be below current price; BUY stop must be above current price
+    if ((stopSide === "SELL" && !(rawStop <= lastPrice - tick)) || (stopSide === "BUY" && !(rawStop >= lastPrice + tick))) {
+      return;
+    }
+    const current = this.findCurrentStop(stopSide);
+    if (!current) {
+      await this.tryPlaceStopLoss(stopSide, rawStop, lastPrice, absPosition);
+      return;
+    }
+    const existing = Number(current.stopPrice);
+    const canImprove =
+      (stopSide === "SELL" && rawStop >= existing + tick) ||
+      (stopSide === "BUY" && rawStop <= existing - tick);
+    if (canImprove) {
+      await this.tryReplaceStop(stopSide, current, rawStop, lastPrice, absPosition);
+    }
+  }
+
+  private async tryPlaceStopLoss(
+    side: "BUY" | "SELL",
+    stopPrice: number,
+    lastPrice: number,
+    quantity: number
+  ): Promise<void> {
+    try {
+      await placeStopLossOrder(
+        this.exchange,
+        this.config.symbol,
+        this.openOrders,
+        this.locks,
+        this.timers,
+        this.pending,
+        side,
+        stopPrice,
+        quantity,
+        lastPrice,
+        (type, detail) => this.tradeLog.push(type, detail),
+        {
+          markPrice: getPosition(this.accountSnapshot, this.config.symbol).markPrice,
+          maxPct: this.config.maxCloseSlippagePct,
+        },
+        { priceTick: this.config.priceTick, qtyStep: 0.001 }
+      );
+    } catch (err) {
+      this.tradeLog.push("error", `挂止损单失败: ${String(err)}`);
+    }
+  }
+
+  private async tryReplaceStop(
+    side: "BUY" | "SELL",
+    currentOrder: AsterOrder,
+    nextStopPrice: number,
+    lastPrice: number,
+    quantity: number
+  ): Promise<void> {
+    const invalidForSide = (side === "SELL" && nextStopPrice >= lastPrice) || (side === "BUY" && nextStopPrice <= lastPrice);
+    if (invalidForSide) return;
+    try {
+      await this.exchange.cancelOrder({ symbol: this.config.symbol, orderId: currentOrder.orderId });
+    } catch (err) {
+      if (isUnknownOrderError(err)) {
+        this.tradeLog.push("order", "原止损单已不存在，跳过撤销");
+        this.openOrders = this.openOrders.filter((o) => o.orderId !== currentOrder.orderId);
+      } else {
+        this.tradeLog.push("error", `取消原止损单失败: ${String(err)}`);
+      }
+    }
+    try {
+      const order = await placeStopLossOrder(
+        this.exchange,
+        this.config.symbol,
+        this.openOrders,
+        this.locks,
+        this.timers,
+        this.pending,
+        side,
+        nextStopPrice,
+        quantity,
+        lastPrice,
+        (type, detail) => this.tradeLog.push(type, detail),
+        {
+          markPrice: getPosition(this.accountSnapshot, this.config.symbol).markPrice,
+          maxPct: this.config.maxCloseSlippagePct,
+        },
+        { priceTick: this.config.priceTick, qtyStep: 0.001 }
+      );
+      if (order) {
+        this.tradeLog.push(
+          "stop",
+          `移动止损到 ${formatPriceToString(nextStopPrice, Math.max(0, Math.floor(Math.log10(1 / this.config.priceTick))))}`
+        );
+      }
+    } catch (err) {
+      this.tradeLog.push("error", `移动止损失败: ${String(err)}`);
+      const existingStopPrice = Number(currentOrder.stopPrice);
+      const restoreInvalid = (side === "SELL" && existingStopPrice >= lastPrice) || (side === "BUY" && existingStopPrice <= lastPrice);
+      if (!restoreInvalid && Number.isFinite(existingStopPrice)) {
+        try {
+          await placeStopLossOrder(
+            this.exchange,
+            this.config.symbol,
+            this.openOrders,
+            this.locks,
+            this.timers,
+            this.pending,
+            side,
+            existingStopPrice,
+            quantity,
+            lastPrice,
+            (t, d) => this.tradeLog.push(t, d),
+            {
+              markPrice: getPosition(this.accountSnapshot, this.config.symbol).markPrice,
+              maxPct: this.config.maxCloseSlippagePct,
+            },
+            { priceTick: this.config.priceTick, qtyStep: 0.001 }
+          );
+          this.tradeLog.push(
+            "order",
+            `恢复原止损 @ ${formatPriceToString(existingStopPrice, Math.max(0, Math.floor(Math.log10(1 / this.config.priceTick))))}`
+          );
+        } catch (recoverErr) {
+          this.tradeLog.push("error", `恢复原止损失败: ${String(recoverErr)}`);
+        }
+      }
     }
   }
 
