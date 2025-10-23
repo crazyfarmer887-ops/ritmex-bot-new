@@ -6,6 +6,7 @@ import { buildAdapterFromEnv } from "../exchanges/resolve-from-env";
 import { OffsetMakerEngine, type OffsetMakerEngineSnapshot } from "../strategy/offset-maker-engine";
 import { DataTable, type TableColumn } from "./components/DataTable";
 import { formatNumber } from "../utils/format";
+import { t } from "../utils/i18n";
 
 interface OffsetMakerAppProps {
   onExit: () => void;
@@ -54,8 +55,8 @@ export function OffsetMakerApp({ onExit }: OffsetMakerAppProps) {
   if (error) {
     return (
       <Box flexDirection="column" padding={1}>
-        <Text color="red">启动失败: {error.message}</Text>
-        <Text color="gray">请检查环境变量和网络连通性。</Text>
+        <Text color="red">{t("启动失败:")} {error.message}</Text>
+        <Text color="gray">{t("请检查环境变量和网络连通性。")}</Text>
       </Box>
     );
   }
@@ -63,7 +64,7 @@ export function OffsetMakerApp({ onExit }: OffsetMakerAppProps) {
   if (!snapshot) {
     return (
       <Box padding={1}>
-        <Text>正在初始化偏移做市策略…</Text>
+        <Text>{t("正在初始化偏移做市策略…")}</Text>
       </Box>
     );
   }
@@ -85,13 +86,13 @@ export function OffsetMakerApp({ onExit }: OffsetMakerAppProps) {
     status: order.status,
   }));
   const openOrderColumns: TableColumn[] = [
-    { key: "id", header: "ID", align: "right", minWidth: 6 },
-    { key: "side", header: "Side", minWidth: 4 },
-    { key: "price", header: "Price", align: "right", minWidth: 10 },
-    { key: "qty", header: "Qty", align: "right", minWidth: 8 },
-    { key: "filled", header: "Filled", align: "right", minWidth: 8 },
-    { key: "reduceOnly", header: "RO", minWidth: 4 },
-    { key: "status", header: "Status", minWidth: 10 },
+    { key: "id", header: t("ID"), align: "right", minWidth: 6 },
+    { key: "side", header: t("Side"), minWidth: 4 },
+    { key: "price", header: t("Price"), align: "right", minWidth: 10 },
+    { key: "qty", header: t("Qty"), align: "right", minWidth: 8 },
+    { key: "filled", header: t("Filled"), align: "right", minWidth: 8 },
+    { key: "reduceOnly", header: t("RO"), minWidth: 4 },
+    { key: "status", header: t("Status"), minWidth: 10 },
   ];
 
   const desiredRows = snapshot.desiredOrders.map((order, index) => ({
@@ -103,75 +104,75 @@ export function OffsetMakerApp({ onExit }: OffsetMakerAppProps) {
   }));
   const desiredColumns: TableColumn[] = [
     { key: "index", header: "#", align: "right", minWidth: 2 },
-    { key: "side", header: "Side", minWidth: 4 },
-    { key: "price", header: "Price", align: "right", minWidth: 10 },
-    { key: "amount", header: "Qty", align: "right", minWidth: 8 },
-    { key: "reduceOnly", header: "RO", minWidth: 4 },
+    { key: "side", header: t("Side"), minWidth: 4 },
+    { key: "price", header: t("Price"), align: "right", minWidth: 10 },
+    { key: "amount", header: t("Qty"), align: "right", minWidth: 8 },
+    { key: "reduceOnly", header: t("RO"), minWidth: 4 },
   ];
 
   const lastLogs = snapshot.tradeLog.slice(-5);
   const imbalanceLabel = snapshot.depthImbalance === "balanced"
-    ? "均衡"
+    ? t("均衡")
     : snapshot.depthImbalance === "buy_dominant"
-    ? "买盘占优"
-    : "卖盘占优";
+    ? t("买盘占优")
+    : t("卖盘占优");
 
   return (
     <Box flexDirection="column" paddingX={1}>
       <Box flexDirection="column" marginBottom={1}>
-        <Text color="cyanBright">Offset Maker Strategy Dashboard</Text>
+        <Text color="cyanBright">{t("Offset Maker Strategy Dashboard")}</Text>
         <Text>
-          交易所: {exchangeName} ｜ 交易对: {snapshot.symbol} ｜ 买一价: {formatNumber(topBid, 2)} ｜ 卖一价: {formatNumber(topAsk, 2)} ｜ 点差: {spreadDisplay}
+          {t("交易所:")} {exchangeName} ｜ {t("交易对:")} {snapshot.symbol} ｜ {t("买一价:")} {formatNumber(topBid, 2)} ｜ {t("卖一价:")} {formatNumber(topAsk, 2)} ｜ {t("点差:")} {spreadDisplay}
         </Text>
         <Text>
-          买10档累计: {formatNumber(snapshot.buyDepthSum10, 4)} ｜ 卖10档累计: {formatNumber(snapshot.sellDepthSum10, 4)} ｜ 状态: {imbalanceLabel}
+          {t("买10档累计:")} {formatNumber(snapshot.buyDepthSum10, 4)} ｜ {t("卖10档累计:")} {formatNumber(snapshot.sellDepthSum10, 4)} ｜ {t("状态:")} {imbalanceLabel}
         </Text>
         <Text color="gray">
-          当前挂单策略: BUY {snapshot.skipBuySide ? "暂停" : "启用"} ｜ SELL {snapshot.skipSellSide ? "暂停" : "启用"} ｜ 按 Esc 返回策略选择
+          {t("当前挂单策略:")} BUY {snapshot.skipBuySide ? t("暂停") : t("启用")} ｜ SELL {snapshot.skipSellSide ? t("暂停") : t("启用")} ｜ {t("按 Esc 返回策略选择")}
         </Text>
-        <Text color="gray">状态: {snapshot.ready ? "实时运行" : "等待市场数据"}</Text>
+        <Text color="gray">{t("状态:")} {snapshot.ready ? t("实时运行") : t("等待市场数据")}</Text>
       </Box>
 
       <Box flexDirection="row" marginBottom={1}>
         <Box flexDirection="column" marginRight={4}>
-          <Text color="greenBright">持仓</Text>
+          <Text color="greenBright">{t("持仓")}</Text>
           {hasPosition ? (
             <>
               <Text>
-                方向: {snapshot.position.positionAmt > 0 ? "多" : "空"} ｜ 数量: {formatNumber(Math.abs(snapshot.position.positionAmt), 4)} ｜ 开仓价: {formatNumber(snapshot.position.entryPrice, 2)}
+                {t("方向:")} {snapshot.position.positionAmt > 0 ? t("多") : t("空")} ｜ {t("数量:")} {formatNumber(Math.abs(snapshot.position.positionAmt), 4)} ｜ {t("开仓价:")} {formatNumber(snapshot.position.entryPrice, 2)}
               </Text>
               <Text>
-                浮动盈亏: {formatNumber(snapshot.pnl, 4)} USDT ｜ 账户未实现盈亏: {formatNumber(snapshot.accountUnrealized, 4)} USDT
+                {t("浮动盈亏:")} {formatNumber(snapshot.pnl, 4)} USDT ｜ {t("账户未实现盈亏:")} {formatNumber(snapshot.accountUnrealized, 4)} USDT
               </Text>
             </>
           ) : (
-            <Text color="gray">当前无持仓</Text>
+            <Text color="gray">{t("当前无持仓")}</Text>
           )}
         </Box>
         <Box flexDirection="column">
-          <Text color="greenBright">目标挂单</Text>
+          <Text color="greenBright">{t("目标挂单")}</Text>
           {desiredRows.length > 0 ? (
             <DataTable columns={desiredColumns} rows={desiredRows} />
           ) : (
-            <Text color="gray">暂无目标挂单</Text>
+            <Text color="gray">{t("暂无目标挂单")}</Text>
           )}
           <Text>
-            累计成交量: {formatNumber(snapshot.sessionVolume, 2)} USDT
+            {t("累计成交量:")} {formatNumber(snapshot.sessionVolume, 2)} USDT
           </Text>
         </Box>
       </Box>
 
       <Box flexDirection="column" marginBottom={1}>
-        <Text color="yellow">当前挂单</Text>
+        <Text color="yellow">{t("当前挂单")}</Text>
         {openOrderRows.length > 0 ? (
           <DataTable columns={openOrderColumns} rows={openOrderRows} />
         ) : (
-          <Text color="gray">暂无挂单</Text>
+          <Text color="gray">{t("暂无挂单")}</Text>
         )}
       </Box>
 
       <Box flexDirection="column">
-        <Text color="yellow">最近事件</Text>
+        <Text color="yellow">{t("最近事件")}</Text>
         {lastLogs.length > 0 ? (
           lastLogs.map((item, index) => (
             <Text key={`${item.time}-${index}`}>
@@ -179,7 +180,7 @@ export function OffsetMakerApp({ onExit }: OffsetMakerAppProps) {
             </Text>
           ))
         ) : (
-          <Text color="gray">暂无日志</Text>
+          <Text color="gray">{t("暂无日志")}</Text>
         )}
       </Box>
     </Box>

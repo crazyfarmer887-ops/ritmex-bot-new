@@ -5,6 +5,7 @@ import { getExchangeDisplayName, resolveExchangeId } from "../exchanges/create-a
 import { buildAdapterFromEnv } from "../exchanges/resolve-from-env";
 import { BasisArbEngine, type BasisArbSnapshot } from "../strategy/basis-arb-engine";
 import { formatNumber } from "../utils/format";
+import { t } from "../utils/i18n";
 
 interface BasisAppProps {
   onExit: () => void;
@@ -31,7 +32,7 @@ export function BasisApp({ onExit }: BasisAppProps) {
 
   useEffect(() => {
     if (exchangeId !== "aster") {
-      setError(new Error("期现套利策略目前仅支持 Aster 交易所。请设置 EXCHANGE=aster 后重试。"));
+      setError(new Error(t("期现套利策略目前仅支持 Aster 交易所。请设置 EXCHANGE=aster 后重试。")));
       return;
     }
     try {
@@ -57,8 +58,8 @@ export function BasisApp({ onExit }: BasisAppProps) {
   if (error) {
     return (
       <Box flexDirection="column" padding={1}>
-        <Text color="red">无法启动期现套利策略: {error.message}</Text>
-        <Text color="gray">按 Esc 返回菜单。</Text>
+        <Text color="red">{t("无法启动期现套利策略:")} {error.message}</Text>
+        <Text color="gray">{t("按 Esc 返回菜单。")}</Text>
       </Box>
     );
   }
@@ -66,7 +67,7 @@ export function BasisApp({ onExit }: BasisAppProps) {
   if (!snapshot) {
     return (
       <Box padding={1}>
-        <Text>正在初始化期现套利监控…</Text>
+        <Text>{t("正在初始化期现套利监控…")}</Text>
       </Box>
     );
   }
@@ -97,72 +98,72 @@ export function BasisApp({ onExit }: BasisAppProps) {
   return (
     <Box flexDirection="column" paddingX={1}>
       <Box flexDirection="column" marginBottom={1}>
-        <Text color="cyanBright">Basis Arbitrage Dashboard</Text>
+        <Text color="cyanBright">{t("Basis Arbitrage Dashboard")}</Text>
         <Text>
-          交易所: {exchangeName} ｜ 期货合约: {snapshot.futuresSymbol} ｜ 现货交易对: {snapshot.spotSymbol}
+          {t("交易所:")} {exchangeName} ｜ {t("期货合约:")} {snapshot.futuresSymbol} ｜ {t("现货交易对:")} {snapshot.spotSymbol}
         </Text>
-        <Text color="gray">按 Esc 返回策略选择 ｜ 数据状态: 期货({feedStatus.futures ? "OK" : "--"}) 现货({feedStatus.spot ? "OK" : "--"}) 资金费率({feedStatus.funding ? "OK" : "--"})</Text>
-        <Text color="gray">最近更新时间: {lastUpdated}</Text>
+        <Text color="gray">{t("按 Esc 返回策略选择 ｜ 数据状态:")} {t("期货")}({feedStatus.futures ? "OK" : "--"}) {t("现货")}({feedStatus.spot ? "OK" : "--"}) {t("资金费率")}({feedStatus.funding ? "OK" : "--"})</Text>
+        <Text color="gray">{t("最近更新时间:")} {lastUpdated}</Text>
       </Box>
 
       <Box flexDirection="row" marginBottom={1}>
         <Box flexDirection="column" marginRight={4}>
-          <Text color="greenBright">期货盘口</Text>
-          <Text>买一: {futuresBid} ｜ 卖一: {futuresAsk}</Text>
-          <Text color="gray">更新时间: {futuresUpdated}</Text>
+          <Text color="greenBright">{t("期货盘口")}</Text>
+          <Text>{t("买一:")} {futuresBid} ｜ {t("卖一:")} {futuresAsk}</Text>
+          <Text color="gray">{t("更新时间:")} {futuresUpdated}</Text>
         </Box>
         <Box flexDirection="column">
-          <Text color="greenBright">现货盘口</Text>
-          <Text>买一: {spotBid} ｜ 卖一: {spotAsk}</Text>
-          <Text color="gray">更新时间: {spotUpdated}</Text>
+          <Text color="greenBright">{t("现货盘口")}</Text>
+          <Text>{t("买一:")} {spotBid} ｜ {t("卖一:")} {spotAsk}</Text>
+          <Text color="gray">{t("更新时间:")} {spotUpdated}</Text>
         </Box>
       </Box>
 
       <Box flexDirection="column" marginBottom={1}>
-        <Text color="yellow">资金费率</Text>
-        <Text>当前资金费率: {fundingRatePct}</Text>
-        <Text color="gray">资金费率更新时间: {fundingUpdated} ｜ 下次结算时间: {nextFundingTime}</Text>
-        <Text>单次资金费率收益(估): {fundingIncomePerFunding} ｜ 日收益(估): {fundingIncomePerDay}</Text>
-        <Text>双边吃单手续费(估): {takerFeesPerRoundTrip} ｜ 回本所需资金费率次数: {fundingCountToBreakeven}</Text>
+        <Text color="yellow">{t("资金费率")}</Text>
+        <Text>{t("当前资金费率:")} {fundingRatePct}</Text>
+        <Text color="gray">{t("资金费率更新时间:")} {fundingUpdated} ｜ {t("下次结算时间:")} {nextFundingTime}</Text>
+        <Text>{t("单次资金费率收益(估):")} {fundingIncomePerFunding} ｜ {t("日收益(估):")} {fundingIncomePerDay}</Text>
+        <Text>{t("双边吃单手续费(估):")} {takerFeesPerRoundTrip} ｜ {t("回本所需资金费率次数:")} {fundingCountToBreakeven}</Text>
       </Box>
 
       <Box flexDirection="row" marginBottom={1}>
         <Box flexDirection="column" marginRight={4}>
-          <Text color="cyan">现货账户余额（非0）</Text>
+          <Text color="cyan">{t("现货账户余额（非0）")}</Text>
           {spotBalances.length ? (
             spotBalances.map((b) => (
               <Text key={`spot-${b.asset}`}>
-                {b.asset}: 可用 {formatNumber(b.free, 8)} ｜ 冻结 {formatNumber(b.locked, 8)}
+                {b.asset}: {t("可用")} {formatNumber(b.free, 8)} ｜ {t("冻结")} {formatNumber(b.locked, 8)}
               </Text>
             ))
           ) : (
-            <Text color="gray">无</Text>
+            <Text color="gray">{t("无")}</Text>
           )}
         </Box>
         <Box flexDirection="column">
-          <Text color="cyan">合约账户余额（非0）</Text>
+          <Text color="cyan">{t("合约账户余额（非0）")}</Text>
           {futuresBalances.length ? (
             futuresBalances.map((b) => (
               <Text key={`fut-${b.asset}`}>
-                {b.asset}: 钱包 {formatNumber(b.wallet, 8)} ｜ 可用 {formatNumber(b.available, 8)}
+                {b.asset}: {t("钱包")} {formatNumber(b.wallet, 8)} ｜ {t("可用")} {formatNumber(b.available, 8)}
               </Text>
             ))
           ) : (
-            <Text color="gray">无</Text>
+            <Text color="gray">{t("无")}</Text>
           )}
         </Box>
       </Box>
 
       <Box flexDirection="column" marginBottom={1}>
-        <Text color={snapshot.opportunity ? "greenBright" : "redBright"}>套利差价（卖期货 / 买现货）</Text>
-        <Text color={snapshot.opportunity ? "green" : undefined}>毛价差: {spread} USDT ｜ {spreadBps} bp</Text>
+        <Text color={snapshot.opportunity ? "greenBright" : "redBright"}>{t("套利差价（卖期货 / 买现货）")}</Text>
+        <Text color={snapshot.opportunity ? "green" : undefined}>{t("毛价差:")} {spread} USDT ｜ {spreadBps} bp</Text>
         <Text color={snapshot.opportunity ? "green" : "red"}>
-          扣除 taker 手续费 ({(basisConfig.takerFeeRate * 100).toFixed(4)}% × 双边): {netSpread} USDT ｜ {netSpreadBps} bp
+          {t("扣除 taker 手续费")} ({(basisConfig.takerFeeRate * 100).toFixed(4)}% × {t("双边")}): {netSpread} USDT ｜ {netSpreadBps} bp
         </Text>
       </Box>
 
       <Box flexDirection="column">
-        <Text color="yellow">最近事件</Text>
+        <Text color="yellow">{t("最近事件")}</Text>
         {lastLogs.length ? (
           lastLogs.map((entry, index) => {
             const color = entry.type === "entry" ? "green" : entry.type === "exit" ? "red" : undefined;
@@ -173,7 +174,7 @@ export function BasisApp({ onExit }: BasisAppProps) {
             );
           })
         ) : (
-          <Text color="gray">暂无日志</Text>
+          <Text color="gray">{t("暂无日志")}</Text>
         )}
       </Box>
     </Box>
