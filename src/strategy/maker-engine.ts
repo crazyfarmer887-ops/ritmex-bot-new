@@ -340,6 +340,8 @@ export class MakerEngine {
       if (Number.isFinite(closeSidePx)) {
         await this.ensureProtectiveStop(position, Number(closeSidePx));
       }
+      // Refresh existing stop-loss to current quote (limit==trigger at quote)
+      await this.refreshStopToQuoteIfOpen(position, Number(closeBidPrice), Number(closeAskPrice));
       await this.checkRisk(position, Number(closeBidPrice), Number(closeAskPrice));
       this.emitUpdate();
     } catch (error) {
@@ -673,7 +675,7 @@ export class MakerEngine {
     lastPrice: number,
     quantity: number
   ): Promise<void> {
-    const invalidForSide = (side === "SELL" && nextStopPrice >= lastPrice) || (side === "BUY" && nextStopPrice <= lastPrice);
+    const invalidForSide = (side === "SELL" && nextStopPrice > lastPrice) || (side === "BUY" && nextStopPrice < lastPrice);
     if (invalidForSide) return;
     try {
       await this.exchange.cancelOrder({ symbol: this.config.symbol, orderId: currentOrder.orderId });
@@ -742,6 +744,76 @@ export class MakerEngine {
           this.tradeLog.push("error", `恢复原止损失败: ${String(recoverErr)}`);
         }
       }
+    }
+  }
+
+  // 自动将现有止损单价格（stopPrice 与 limit 价）刷新为当前对手价
+  private async refreshStopToQuoteIfOpen(position: PositionSnapshot, closeBidPrice: number, closeAskPrice: number): Promise<void> {
+    const absPosition = Math.abs(position.positionAmt);
+    if (absPosition < EPS) return;
+    const hasEntry = Number.isFinite(position.entryPrice) && Math.abs(position.entryPrice) > 1e-8;
+    if (!hasEntry) return;
+    const stopSide: "BUY" | "SELL" = position.positionAmt > 0 ? "SELL" : "BUY";
+    const current = this.findCurrentStop(stopSide);
+    if (!current) return;
+    const lastPrice = stopSide === "SELL" ? Number(closeBidPrice) : Number(closeAskPrice);
+    if (!Number.isFinite(lastPrice)) return;
+    const tick = Math.max(1e-9, this.config.priceTick);
+    const priceDecimals = Math.max(0, Math.floor(Math.log10(1 / this.config.priceTick)));
+    const desired = Number(formatPriceToString(lastPrice, priceDecimals));
+    const existing = Number(current.stopPrice);
+    if (!Number.isFinite(existing)) return;
+    if (Math.abs(desired - existing) < tick) return;
+    await this.replaceStopExact(stopSide, current, desired, lastPrice, absPosition);
+  }
+
+  // 撤销并用“exactLimitAtStop”方式重挂止损单（limit 价==trigger 价）
+  private async replaceStopExact(
+    side: "BUY" | "SELL",
+    currentOrder: AsterOrder,
+    nextStopPrice: number,
+    lastPrice: number,
+    quantity: number
+  ): Promise<void> {
+    const invalidForSide = (side === "SELL" && nextStopPrice > lastPrice) || (side === "BUY" && nextStopPrice < lastPrice);
+    if (invalidForSide) return;
+    try {
+      await this.exchange.cancelOrder({ symbol: this.config.symbol, orderId: currentOrder.orderId });
+    } catch (err) {
+      if (isUnknownOrderError(err)) {
+        this.tradeLog.push("order", "原止损单已不存在，跳过撤销");
+        this.openOrders = this.openOrders.filter((o) => o.orderId !== currentOrder.orderId);
+      } else {
+        this.tradeLog.push("error", `取消原止损单失败: ${String(err)}`);
+      }
+    }
+    try {
+      const order = await placeStopLossOrder(
+        this.exchange,
+        this.config.symbol,
+        this.openOrders,
+        this.locks,
+        this.timers,
+        this.pending,
+        side,
+        nextStopPrice,
+        quantity,
+        lastPrice,
+        (type, detail) => this.tradeLog.push(type, detail),
+        {
+          markPrice: getPosition(this.accountSnapshot, this.config.symbol).markPrice,
+          maxPct: this.config.maxCloseSlippagePct,
+        },
+        { priceTick: this.config.priceTick, qtyStep: 0.001, exactLimitAtStop: true }
+      );
+      if (order) {
+        this.tradeLog.push(
+          "stop",
+          `移动止损到 ${formatPriceToString(nextStopPrice, Math.max(0, Math.floor(Math.log10(1 / this.config.priceTick))))}`
+        );
+      }
+    } catch (err) {
+      this.tradeLog.push("error", `移动止损失败: ${String(err)}`);
     }
   }
 

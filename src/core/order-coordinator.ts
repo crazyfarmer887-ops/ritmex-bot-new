@@ -239,11 +239,11 @@ export async function placeStopLossOrder(
   if (isOperating(locks, dedupeType)) return;
   if (!enforceMarkPriceGuard(side, stopPrice, guard, log, "止损单")) return;
   if (lastPrice != null) {
-    if (side === "SELL" && stopPrice >= lastPrice) {
+    if (side === "SELL" && stopPrice > lastPrice) {
       log("error", `止损价 ${stopPrice} 高于或等于当前价 ${lastPrice}，取消挂单`);
       return;
     }
-    if (side === "BUY" && stopPrice <= lastPrice) {
+    if (side === "BUY" && stopPrice < lastPrice) {
       log("error", `止损价 ${stopPrice} 低于或等于当前价 ${lastPrice}，取消挂单`);
       return;
     }
