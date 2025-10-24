@@ -777,6 +777,7 @@ export class MakerEngine {
   ): Promise<void> {
     const invalidForSide = (side === "SELL" && nextStopPrice > lastPrice) || (side === "BUY" && nextStopPrice < lastPrice);
     if (invalidForSide) return;
+    const existingStopPrice = Number(currentOrder.stopPrice);
     try {
       await this.exchange.cancelOrder({ symbol: this.config.symbol, orderId: currentOrder.orderId });
     } catch (err) {
@@ -814,6 +815,36 @@ export class MakerEngine {
       }
     } catch (err) {
       this.tradeLog.push("error", `移动止损失败: ${String(err)}`);
+      // Fallback: attempt to restore original stop if valid
+      const restoreInvalid = (side === "SELL" && existingStopPrice >= lastPrice) || (side === "BUY" && existingStopPrice <= lastPrice);
+      if (!restoreInvalid && Number.isFinite(existingStopPrice)) {
+        try {
+          await placeStopLossOrder(
+            this.exchange,
+            this.config.symbol,
+            this.openOrders,
+            this.locks,
+            this.timers,
+            this.pending,
+            side,
+            existingStopPrice,
+            quantity,
+            lastPrice,
+            (type, detail) => this.tradeLog.push(type, detail),
+            {
+              markPrice: getPosition(this.accountSnapshot, this.config.symbol).markPrice,
+              maxPct: this.config.maxCloseSlippagePct,
+            },
+            { priceTick: this.config.priceTick, qtyStep: 0.001, exactLimitAtStop: true }
+          );
+          this.tradeLog.push(
+            "order",
+            `恢复原止损 @ ${formatPriceToString(existingStopPrice, Math.max(0, Math.floor(Math.log10(1 / this.config.priceTick))))}`
+          );
+        } catch (recoverErr) {
+          this.tradeLog.push("error", `恢复原止损失败: ${String(recoverErr)}`);
+        }
+      }
     }
   }
 
