@@ -131,6 +131,32 @@ describe("order-coordinator", () => {
     expect(log).toHaveBeenCalledWith("stop", expect.stringContaining("LIMIT"));
   });
 
+  it("places stop loss with exact limit at stop when enabled", async () => {
+    const adapter = createMockExchange();
+    const locks: OrderLockMap = {};
+    const timers: OrderTimerMap = {};
+    const pending: OrderPendingMap = {};
+    const log = vi.fn();
+    await placeStopLossOrder(
+      adapter,
+      "BTCUSDT",
+      [],
+      locks,
+      timers,
+      pending,
+      "SELL",
+      100,
+      1,
+      null,
+      log,
+      undefined,
+      { priceTick: 0.1, qtyStep: 0.001, exactLimitAtStop: true }
+    );
+    expect(adapter.createOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "LIMIT", stopPrice: 100, price: 100 })
+    );
+  });
+
   it("places trailing stop order", async () => {
     const adapter = createMockExchange();
     const locks: OrderLockMap = {};
