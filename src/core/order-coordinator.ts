@@ -232,7 +232,7 @@ export async function placeStopLossOrder(
   lastPrice: number | null,
   log: LogHandler,
   guard?: OrderGuardOptions,
-  opts?: { priceTick: number; qtyStep: number }
+  opts?: { priceTick: number; qtyStep: number; exactLimitAtStop?: boolean }
 ): Promise<AsterOrder | undefined> {
   // Use STOP_MARKET namespace for locks/dedupe, but create a stop-limit order underneath
   const dedupeType = "STOP_MARKET";
@@ -251,10 +251,14 @@ export async function placeStopLossOrder(
   const priceTick = opts?.priceTick ?? 0.1;
   const qtyStep = opts?.qtyStep ?? 0.001;
 
-  // Compute stop-limit price with 1-tick offset relative to trigger
+  // Compute stop-limit price. When exactLimitAtStop is enabled, use trigger as the limit price
   const trigger = roundDownToTick(stopPrice, priceTick);
-  const limitBase = side === "SELL" ? trigger - priceTick : trigger + priceTick;
-  const limitPrice = side === "SELL" ? roundDownToTick(limitBase, priceTick) : roundUpToTick(limitBase, priceTick);
+  const limitPrice = opts?.exactLimitAtStop
+    ? trigger
+    : ((): number => {
+        const limitBase = side === "SELL" ? trigger - priceTick : trigger + priceTick;
+        return side === "SELL" ? roundDownToTick(limitBase, priceTick) : roundUpToTick(limitBase, priceTick);
+      })();
 
   const params: CreateOrderParams = {
     symbol,

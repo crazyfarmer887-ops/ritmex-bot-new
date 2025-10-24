@@ -470,6 +470,38 @@ export class MakerEngine {
             timeInForce: undefined,
           }
         );
+
+        // Pre-bid protective stop: if quoting at top-of-book (bidOffset=0, askOffset=0),
+        // place a reduce-only stop-limit SELL at the current ask for a BUY entry.
+        if (
+          !target.reduceOnly &&
+          target.side === "BUY" &&
+          this.config.bidOffset === 0 &&
+          this.config.askOffset === 0
+        ) {
+          const { topAsk } = getTopPrices(this.depthSnapshot);
+          if (Number.isFinite(topAsk)) {
+            try {
+              await placeStopLossOrder(
+                this.exchange,
+                this.config.symbol,
+                this.openOrders,
+                this.locks,
+                this.timers,
+                this.pending,
+                "SELL",
+                Number(topAsk),
+                target.amount,
+                null,
+                (type, detail) => this.tradeLog.push(type, detail),
+                undefined,
+                { priceTick: this.config.priceTick, qtyStep: 0.001, exactLimitAtStop: true }
+              );
+            } catch (err) {
+              this.tradeLog.push("error", `预挂止损失败: ${String(err)}`);
+            }
+          }
+        }
       } catch (error) {
         if (isInsufficientBalanceError(error)) {
           this.registerInsufficientBalance(error);
