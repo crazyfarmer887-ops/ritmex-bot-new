@@ -98,10 +98,11 @@ export async function deduplicateOrders(
     return exactMatch || matchesStop;
   });
   if (sameTypeOrders.length <= 1) return;
+  // Keep the most recently updated order and cancel older duplicates
   sameTypeOrders.sort((a, b) => {
-    const ta = b.updateTime || b.time || 0;
-    const tb = a.updateTime || a.time || 0;
-    return ta - tb;
+    const ta = a.updateTime || a.time || 0;
+    const tb = b.updateTime || b.time || 0;
+    return tb - ta; // descending by update time
   });
   const toCancel = sameTypeOrders.slice(1);
   const orderIdList = toCancel.map((o) => o.orderId);
@@ -285,6 +286,68 @@ export async function placeStopLossOrder(
     unlockOperating(locks, timers, pendings, dedupeType);
     if (isUnknownOrderError(err)) {
       log("order", "止损单已失效，跳过");
+      return undefined;
+    }
+    throw err;
+  }
+}
+
+/**
+ * Place a pre-emptive stop-limit order that is intended to exist before an entry fills.
+ * Requirements:
+ * - Trigger price equals the provided trigger (typically top ask)
+ * - Limit price equals the trigger price (no extra tick offset)
+ * - Must be LIMIT, reduce-only, and close-position semantics
+ * - Skips lastPrice-side validation so it can exist pre-entry
+ */
+export async function placePreemptiveStopLimitOrder(
+  adapter: ExchangeAdapter,
+  symbol: string,
+  openOrders: AsterOrder[],
+  locks: OrderLockMap,
+  timers: OrderTimerMap,
+  pendings: OrderPendingMap,
+  side: "BUY" | "SELL",
+  triggerPrice: number,
+  quantity: number,
+  log: LogHandler,
+  guard?: OrderGuardOptions,
+  opts?: { priceTick: number; qtyStep: number }
+): Promise<AsterOrder | undefined> {
+  const dedupeType = "STOP_MARKET";
+  if (isOperating(locks, dedupeType)) return;
+  if (!enforceMarkPriceGuard(side, triggerPrice, guard, log, "预先止损")) return;
+  const priceTick = opts?.priceTick ?? 0.1;
+  const qtyStep = opts?.qtyStep ?? 0.001;
+
+  // Equal trigger and limit price as requested; round to valid tick respecting side
+  const trigger = side === "SELL" ? roundDownToTick(triggerPrice, priceTick) : roundUpToTick(triggerPrice, priceTick);
+  const limitPrice = trigger;
+
+  const params: CreateOrderParams = {
+    symbol,
+    side,
+    type: "LIMIT",
+    quantity: roundQtyDownToStep(quantity, qtyStep),
+    stopPrice: trigger,
+    price: limitPrice,
+    reduceOnly: "true",
+    closePosition: "true",
+    timeInForce: "GTC",
+    triggerType: side === "BUY" ? "TAKE_PROFIT" : "STOP_LOSS",
+  };
+
+  await deduplicateOrders(adapter, symbol, openOrders, locks, timers, pendings, dedupeType, side, log);
+  lockOperating(locks, timers, pendings, dedupeType, log);
+  try {
+    const order = await adapter.createOrder(params);
+    pendings[dedupeType] = String(order.orderId);
+    log("stop", `挂预先止损: ${side} LIMIT @ ${params.price} stop=${params.stopPrice}`);
+    return order;
+  } catch (err) {
+    unlockOperating(locks, timers, pendings, dedupeType);
+    if (isUnknownOrderError(err)) {
+      log("order", "预先止损单已失效或不存在，跳过");
       return undefined;
     }
     throw err;
