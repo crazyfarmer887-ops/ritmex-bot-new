@@ -370,6 +370,11 @@ export class TrendEngine {
       this.trackPositionLifecycle(position, price);
       this.lastSma30 = sma30;
       this.lastPrice = price;
+      // 若存在未成交的止损单，将其 stopPrice 与限价同步至当前对手价
+      const closeSidePx = position.positionAmt > 0 ? Number(this.depthSnapshot?.bids?.[0]?.[0]) : Number(this.depthSnapshot?.asks?.[0]?.[0]);
+      if (Number.isFinite(closeSidePx)) {
+        await this.refreshStopToQuoteIfOpen(position, Number(closeSidePx));
+      }
       this.emitUpdate();
     } catch (error) {
       if (isRateLimitError(error)) {
@@ -861,8 +866,8 @@ export class TrendEngine {
   ): Promise<void> {
     // 预校验：SELL 止损价必须低于当前价；BUY 止损价必须高于当前价
     const invalidForSide =
-      (side === "SELL" && nextStopPrice >= lastPrice) ||
-      (side === "BUY" && nextStopPrice <= lastPrice);
+      (side === "SELL" && nextStopPrice > lastPrice) ||
+      (side === "BUY" && nextStopPrice < lastPrice);
     if (invalidForSide) {
       // 目标止损价与当前价冲突时跳过移动，避免反复撤单/重下导致的循环
       return;
@@ -939,6 +944,76 @@ export class TrendEngine {
       } catch (recoverErr) {
         this.tradeLog.push("error", `恢复原止损失败: ${String(recoverErr)}`);
       }
+    }
+  }
+
+  // 将已有止损单刷新为最新对手价（触发价与限价等于当前对手价）
+  private async refreshStopToQuoteIfOpen(position: PositionSnapshot, lastPrice: number): Promise<void> {
+    const absPosition = Math.abs(position.positionAmt);
+    if (absPosition <= 1e-5) return;
+    const hasEntry = Number.isFinite(position.entryPrice) && Math.abs(position.entryPrice) > 1e-8;
+    if (!hasEntry) return;
+    const stopSide: "BUY" | "SELL" = position.positionAmt > 0 ? "SELL" : "BUY";
+    const currentStop = this.openOrders.find((o) => {
+      const hasStopPrice = Number.isFinite(Number(o.stopPrice)) && Number(o.stopPrice) > 0;
+      return o.side === stopSide && (String(o.type).toUpperCase().includes("STOP") || hasStopPrice);
+    });
+    if (!currentStop) return;
+    const tick = Math.max(1e-9, this.config.priceTick);
+    const priceDecimals = Math.max(0, Math.floor(Math.log10(1 / this.config.priceTick)));
+    const desired = Number(formatPriceToString(lastPrice, priceDecimals));
+    const existing = Number(currentStop.stopPrice);
+    if (!Number.isFinite(existing)) return;
+    if (Math.abs(desired - existing) < tick) return;
+    await this.replaceStopExact(stopSide, currentStop, desired, lastPrice);
+  }
+
+  private async replaceStopExact(
+    side: "BUY" | "SELL",
+    currentOrder: AsterOrder,
+    nextStopPrice: number,
+    lastPrice: number
+  ): Promise<void> {
+    const invalidForSide =
+      (side === "SELL" && nextStopPrice > lastPrice) ||
+      (side === "BUY" && nextStopPrice < lastPrice);
+    if (invalidForSide) return;
+    try {
+      await this.exchange.cancelOrder({ symbol: this.config.symbol, orderId: currentOrder.orderId });
+    } catch (err) {
+      if (isUnknownOrderError(err)) {
+        this.tradeLog.push("order", "原止损单已不存在，跳过撤销");
+        this.openOrders = this.openOrders.filter((o) => o.orderId !== currentOrder.orderId);
+      } else {
+        this.tradeLog.push("error", `取消原止损单失败: ${String(err)}`);
+      }
+    }
+    try {
+      const position = getPosition(this.accountSnapshot, this.config.symbol);
+      const quantity = Math.abs(position.positionAmt) || this.config.tradeAmount;
+      const order = await placeStopLossOrder(
+        this.exchange,
+        this.config.symbol,
+        this.openOrders,
+        this.locks,
+        this.timers,
+        this.pending,
+        side,
+        nextStopPrice,
+        quantity,
+        lastPrice,
+        (type, detail) => this.tradeLog.push(type, detail),
+        {
+          markPrice: position.markPrice,
+          maxPct: this.config.maxCloseSlippagePct,
+        },
+        { priceTick: this.config.priceTick, qtyStep: this.config.qtyStep, exactLimitAtStop: true }
+      );
+      if (order) {
+        this.tradeLog.push("stop", `移动止损到 ${formatPriceToString(nextStopPrice, Math.max(0, Math.floor(Math.log10(1 / this.config.priceTick))))}`);
+      }
+    } catch (err) {
+      this.tradeLog.push("error", `移动止损失败: ${String(err)}`);
     }
   }
 
