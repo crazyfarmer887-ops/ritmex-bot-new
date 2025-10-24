@@ -19,6 +19,7 @@ import {
   marketClose,
   placeOrder,
   placeStopLossOrder,
+    placePreemptiveStopLimitOrder,
   unlockOperating,
 } from "../core/order-coordinator";
 import type { OrderLockMap, OrderPendingMap, OrderTimerMap } from "../core/order-coordinator";
@@ -447,6 +448,31 @@ export class MakerEngine {
       if (!target) continue;
       if (target.amount < EPS) continue;
       try {
+        // Pre-emptive stop-limit: before placing a new entry, arm a reduce-only stop at the opposite TOB
+        if (!target.reduceOnly) {
+          const { topBid, topAsk } = getTopPrices(this.depthSnapshot);
+          const trigger = target.side === "BUY" ? topAsk : topBid;
+          const stopSide: "BUY" | "SELL" = target.side === "BUY" ? "SELL" : "BUY";
+          if (Number.isFinite(trigger)) {
+            await placePreemptiveStopLimitOrder(
+              this.exchange,
+              this.config.symbol,
+              this.openOrders,
+              this.locks,
+              this.timers,
+              this.pending,
+              stopSide,
+              Number(trigger),
+              target.amount,
+              (type, detail) => this.tradeLog.push(type, detail),
+              {
+                markPrice: getPosition(this.accountSnapshot, this.config.symbol).markPrice,
+                maxPct: this.config.maxCloseSlippagePct,
+              },
+              { priceTick: this.config.priceTick, qtyStep: 0.001 }
+            );
+          }
+        }
         await placeOrder(
           this.exchange,
           this.config.symbol,
@@ -596,10 +622,14 @@ export class MakerEngine {
       return;
     }
     const existing = Number(current.stopPrice);
-    const canImprove =
+    const invalidPlacement =
+      (stopSide === "SELL" && existing >= lastPrice - tick) ||
+      (stopSide === "BUY" && existing <= lastPrice + tick);
+    const canTighten =
       (stopSide === "SELL" && rawStop >= existing + tick) ||
       (stopSide === "BUY" && rawStop <= existing - tick);
-    if (canImprove) {
+    // Replace if existing stop is invalid (e.g., pre-emptive at ask/bid) or we can tighten risk
+    if (invalidPlacement || canTighten) {
       await this.tryReplaceStop(stopSide, current, rawStop, lastPrice, absPosition);
     }
   }
