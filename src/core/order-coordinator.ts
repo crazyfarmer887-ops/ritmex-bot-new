@@ -236,7 +236,9 @@ export async function placeStopLossOrder(
 ): Promise<AsterOrder | undefined> {
   // Use STOP_MARKET namespace for locks/dedupe, but create a stop-limit order underneath
   const dedupeType = "STOP_MARKET";
-  if (isOperating(locks, dedupeType)) return;
+  // A dedicated creation lock to suppress multiple stop placements within a single cycle
+  const createType = "STOP_CREATE";
+  if (isOperating(locks, dedupeType) || isOperating(locks, createType)) return;
   if (!enforceMarkPriceGuard(side, stopPrice, guard, log, "止损单")) return;
   if (lastPrice != null) {
     if (side === "SELL" && stopPrice > lastPrice) {
@@ -278,20 +280,28 @@ export async function placeStopLossOrder(
   };
 
   // Avoid forcing price for STOP_MARKET globally; keep this exchange-specific in gateways
-  await deduplicateOrders(adapter, symbol, openOrders, locks, timers, pendings, dedupeType, side, log);
-  lockOperating(locks, timers, pendings, dedupeType, log);
+  // Acquire a short-lived creation lock to prevent duplicate stop orders within the same tick
+  lockOperating(locks, timers, pendings, createType, log);
   try {
-    const order = await adapter.createOrder(params);
-    pendings[dedupeType] = String(order.orderId);
-    log("stop", `挂止损单: ${side} LIMIT @ ${params.price} stop=${params.stopPrice}`);
-    return order;
-  } catch (err) {
-    unlockOperating(locks, timers, pendings, dedupeType);
-    if (isUnknownOrderError(err)) {
-      log("order", "止损单已失效，跳过");
-      return undefined;
+    await deduplicateOrders(adapter, symbol, openOrders, locks, timers, pendings, dedupeType, side, log);
+    // Hold STOP_MARKET namespace lock during create to suppress concurrent placements
+    lockOperating(locks, timers, pendings, dedupeType, log);
+    try {
+      const order = await adapter.createOrder(params);
+      pendings[dedupeType] = String(order.orderId);
+      log("stop", `挂止损单: ${side} LIMIT @ ${params.price} stop=${params.stopPrice}`);
+      return order;
+    } catch (err) {
+      unlockOperating(locks, timers, pendings, dedupeType);
+      if (isUnknownOrderError(err)) {
+        log("order", "止损单已失效，跳过");
+        return undefined;
+      }
+      throw err;
     }
-    throw err;
+  } finally {
+    // Always release the creation lock regardless of dedupe/create outcome
+    unlockOperating(locks, timers, pendings, createType);
   }
 }
 
