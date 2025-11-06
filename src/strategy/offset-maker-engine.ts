@@ -169,6 +169,7 @@ export class OffsetMakerEngine {
     safeSubscribe<AsterOrder[]>(
       this.exchange.watchOrders.bind(this.exchange),
       (orders) => {
+        this.sessionVolume.observeOrders(orders, this.config.symbol);
         this.syncLocksWithOrders(orders);
         this.openOrders = Array.isArray(orders)
           ? orders.filter((order) => order.type !== "MARKET" && order.symbol === this.config.symbol)

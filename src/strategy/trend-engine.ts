@@ -196,6 +196,7 @@ export class TrendEngine {
     safeSubscribe<AsterOrder[]>(
       this.exchange.watchOrders.bind(this.exchange),
       (orders) => {
+        this.sessionVolume.observeOrders(orders, this.config.symbol);
         this.synchronizeLocks(orders);
         const isActive = (status: string | undefined) => {
           if (!status) return true;
