@@ -101,6 +101,7 @@ export interface MakerConfig {
   maxLogEntries: number;
   maxCloseSlippagePct: number;
   priceTick: number;
+  maxPositionSize: number;
   // New: enforce limit-only execution and boost trade sizes
   strictLimitOnly: boolean;
   volumeBoost: number;
@@ -129,6 +130,16 @@ export const makerConfig: MakerConfig = {
     0.05
   ),
   priceTick: parseNumber(process.env.MAKER_PRICE_TICK ?? process.env.PRICE_TICK, 0.1),
+  maxPositionSize: (() => {
+    const tradeAmount = parseNumber(process.env.TRADE_AMOUNT, 0.001);
+    const fallback = Math.max(tradeAmount * 4, tradeAmount);
+    const raw =
+      process.env.MAKER_MAX_POSITION_SIZE ??
+      process.env.MAKER_POSITION_CAP ??
+      process.env.MAX_POSITION_SIZE;
+    const parsed = parseNumber(raw, fallback);
+    return parsed > 0 ? parsed : fallback;
+  })(),
   // Enforce maker-only by default; override via env if needed
   strictLimitOnly: parseBoolean(
     process.env.MAKER_STRICT_LIMIT_ONLY ?? process.env.STRICT_LIMIT_ONLY,

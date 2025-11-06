@@ -956,6 +956,7 @@ export class OffsetMakerEngine {
     const { topBid, topAsk } = getTopPrices(this.depthSnapshot);
     const spread = topBid != null && topAsk != null ? topAsk - topBid : null;
     const pnl = computePositionPnl(position, topBid, topAsk);
+    const entryOrderSize = this.config.tradeAmount * Math.max(1, Number(this.config.volumeBoost ?? 1));
 
     return {
       ready: this.isReady(),
@@ -971,6 +972,8 @@ export class OffsetMakerEngine {
       desiredOrders: this.desiredOrders,
       tradeLog: this.tradeLog.all(),
       lastUpdated: Date.now(),
+      maxPositionSize: this.config.maxPositionSize,
+      entryOrderSize,
       buyDepthSum10: this.lastBuyDepthSum10,
       sellDepthSum10: this.lastSellDepthSum10,
       depthImbalance: this.lastImbalance,

@@ -29,7 +29,7 @@ import { StrategyEventEmitter } from "./common/event-emitter";
 import { safeSubscribe, type LogHandler } from "./common/subscriptions";
 import { SessionVolumeTracker } from "./common/session-volume";
 
-interface DesiredOrder {
+export interface DesiredOrder {
   side: "BUY" | "SELL";
   price: string; // 改为字符串价格
   amount: number;
@@ -56,6 +56,8 @@ export interface MakerEngineSnapshot {
     depth: boolean;
     ticker: boolean;
   };
+  maxPositionSize: number;
+  entryOrderSize: number;
 }
 
 type MakerEvent = "update";
@@ -63,6 +65,105 @@ type MakerListener = (snapshot: MakerEngineSnapshot) => void;
 
 const EPS = 1e-5;
 const INSUFFICIENT_BALANCE_COOLDOWN_MS = 15_000;
+
+export interface MakerDesiredOrderInputs {
+  positionAmt: number;
+  entryOrderSize: number;
+  inventoryCap: number;
+  bidPrice: string;
+  askPrice: string;
+  closeBidPrice: string;
+  closeAskPrice: string;
+  allowEntries: boolean;
+}
+
+export function computeMakerDesiredOrders(params: MakerDesiredOrderInputs): DesiredOrder[] {
+  const {
+    positionAmt,
+    entryOrderSize,
+    inventoryCap,
+    bidPrice,
+    askPrice,
+    closeBidPrice,
+    closeAskPrice,
+    allowEntries,
+  } = params;
+
+  const desired: DesiredOrder[] = [];
+  const absPosition = Math.abs(positionAmt);
+  if (absPosition > EPS) {
+    const closeSide: "BUY" | "SELL" = positionAmt > 0 ? "SELL" : "BUY";
+    const closePrice = closeSide === "SELL" ? closeAskPrice : closeBidPrice;
+    desired.push({ side: closeSide, price: closePrice, amount: absPosition, reduceOnly: true });
+  }
+
+  if (!allowEntries) {
+    return desired;
+  }
+
+  const baseQty = Number.isFinite(entryOrderSize) && entryOrderSize > EPS ? entryOrderSize : 0;
+  if (baseQty <= EPS) {
+    return desired;
+  }
+
+  const cap = Number.isFinite(inventoryCap) && inventoryCap > EPS ? inventoryCap : Number.POSITIVE_INFINITY;
+
+  const buyQty = computeEntryQty("BUY", positionAmt, baseQty, cap);
+  if (buyQty > EPS) {
+    desired.push({ side: "BUY", price: bidPrice, amount: buyQty, reduceOnly: false });
+  }
+
+  const sellQty = computeEntryQty("SELL", positionAmt, baseQty, cap);
+  if (sellQty > EPS) {
+    desired.push({ side: "SELL", price: askPrice, amount: sellQty, reduceOnly: false });
+  }
+
+  return desired;
+}
+
+function computeEntryQty(
+  side: "BUY" | "SELL",
+  positionAmt: number,
+  baseQty: number,
+  cap: number
+): number {
+  if (baseQty <= EPS) return 0;
+  if (!Number.isFinite(cap) || cap <= EPS) return baseQty;
+
+  if (side === "BUY") {
+    if (positionAmt >= cap - EPS) {
+      // Already at or above long cap, only allow buy orders if they reduce exposure (i.e., current position is short).
+      if (positionAmt >= 0) {
+        return 0;
+      }
+    }
+    const next = positionAmt + baseQty;
+    if (next > cap + EPS) {
+      const allowed = cap - positionAmt;
+      if (allowed <= EPS) {
+        return 0;
+      }
+      return Math.min(baseQty, allowed);
+    }
+    return baseQty;
+  }
+
+  // SELL path
+  if (positionAmt <= -cap + EPS) {
+    if (positionAmt <= 0) {
+      return 0;
+    }
+  }
+  const next = positionAmt - baseQty;
+  if (next < -cap - EPS) {
+    const allowed = positionAmt + cap;
+    if (allowed <= EPS) {
+      return 0;
+    }
+    return Math.min(baseQty, allowed);
+  }
+  return baseQty;
+}
 
 export class MakerEngine {
   private accountSnapshot: AsterAccountSnapshot | null = null;
@@ -312,24 +413,27 @@ export class MakerEngine {
       const bidPrice = formatPriceToString(topBid - this.config.bidOffset, priceDecimals);
       const askPrice = formatPriceToString(topAsk + this.config.askOffset, priceDecimals);
       const position = getPosition(this.accountSnapshot, this.config.symbol);
-      const absPosition = Math.abs(position.positionAmt);
-      const desired: DesiredOrder[] = [];
       const nowTs = Date.now();
       const insufficientActive = this.applyInsufficientBalanceState(nowTs);
       const postCloseActive = this.applyPostCloseCooldownState(nowTs);
       const canEnter = !this.rateLimit.shouldBlockEntries() && !insufficientActive && !postCloseActive;
 
+      const boost = Math.max(1, Number(this.config.volumeBoost ?? 1));
+      const entryOrderSize = this.config.tradeAmount * boost;
+      const desired = computeMakerDesiredOrders({
+        positionAmt: position.positionAmt,
+        entryOrderSize,
+        inventoryCap: this.config.maxPositionSize,
+        bidPrice,
+        askPrice,
+        closeBidPrice,
+        closeAskPrice,
+        allowEntries: canEnter,
+      });
+
+      const absPosition = Math.abs(position.positionAmt);
       if (absPosition < EPS) {
         this.entryPricePendingLogged = false;
-        if (canEnter) {
-          const boost = Math.max(1, Number(this.config.volumeBoost ?? 1));
-          desired.push({ side: "BUY", price: bidPrice, amount: this.config.tradeAmount * boost, reduceOnly: false });
-          desired.push({ side: "SELL", price: askPrice, amount: this.config.tradeAmount * boost, reduceOnly: false });
-        }
-      } else {
-        const closeSide: "BUY" | "SELL" = position.positionAmt > 0 ? "SELL" : "BUY";
-        const closePrice = closeSide === "SELL" ? closeAskPrice : closeBidPrice;
-        desired.push({ side: closeSide, price: closePrice, amount: absPosition, reduceOnly: true });
       }
 
       this.desiredOrders = desired;
@@ -865,6 +969,7 @@ export class MakerEngine {
     const { topBid, topAsk } = getTopPrices(this.depthSnapshot);
     const spread = topBid != null && topAsk != null ? topAsk - topBid : null;
     const pnl = computePositionPnl(position, topBid, topAsk);
+    const entryOrderSize = this.config.tradeAmount * Math.max(1, Number(this.config.volumeBoost ?? 1));
 
     return {
       ready: this.isReady(),
@@ -881,6 +986,8 @@ export class MakerEngine {
       tradeLog: this.tradeLog.all(),
       lastUpdated: Date.now(),
       feedStatus: { ...this.feedStatus },
+      maxPositionSize: this.config.maxPositionSize,
+      entryOrderSize,
     };
   }
 
