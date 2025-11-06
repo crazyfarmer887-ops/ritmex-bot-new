@@ -62,6 +62,34 @@ describe("order-coordinator", () => {
     expect(log).toHaveBeenCalledWith("order", expect.stringContaining("去重撤销重复"));
   });
 
+  it("deduplicates only matching reduceOnly flag", async () => {
+    const adapter = createMockExchange();
+    const locks: OrderLockMap = {};
+    const timers: OrderTimerMap = {};
+    const pending: OrderPendingMap = {};
+    const log = vi.fn();
+    const baseTime = Date.now();
+    const openOrders: AsterOrder[] = [
+      { ...baseOrder, orderId: 10, side: "SELL", reduceOnly: true, updateTime: baseTime },
+      { ...baseOrder, orderId: 11, side: "SELL", reduceOnly: false, updateTime: baseTime - 200 },
+      { ...baseOrder, orderId: 12, side: "SELL", reduceOnly: false, updateTime: baseTime - 100 },
+    ];
+    await deduplicateOrders(
+      adapter,
+      "BTCUSDT",
+      openOrders,
+      locks,
+      timers,
+      pending,
+      "LIMIT",
+      "SELL",
+      log,
+      false
+    );
+    expect(adapter.cancelOrders).toHaveBeenCalledWith({ symbol: "BTCUSDT", orderIdList: [11] });
+    expect(log).toHaveBeenCalledWith("order", expect.stringContaining("去重撤销重复"));
+  });
+
   it("places limit orders and records pending id", async () => {
     const adapter = createMockExchange();
     const locks: OrderLockMap = {};

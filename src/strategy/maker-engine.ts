@@ -311,26 +311,39 @@ export class MakerEngine {
       const closeAskPrice = formatPriceToString(topAsk, priceDecimals);
       const bidPrice = formatPriceToString(topBid - this.config.bidOffset, priceDecimals);
       const askPrice = formatPriceToString(topAsk + this.config.askOffset, priceDecimals);
-      const position = getPosition(this.accountSnapshot, this.config.symbol);
-      const absPosition = Math.abs(position.positionAmt);
-      const desired: DesiredOrder[] = [];
-      const nowTs = Date.now();
-      const insufficientActive = this.applyInsufficientBalanceState(nowTs);
-      const postCloseActive = this.applyPostCloseCooldownState(nowTs);
-      const canEnter = !this.rateLimit.shouldBlockEntries() && !insufficientActive && !postCloseActive;
+        const position = getPosition(this.accountSnapshot, this.config.symbol);
+        const absPosition = Math.abs(position.positionAmt);
+        const desired: DesiredOrder[] = [];
+        const nowTs = Date.now();
+        const insufficientActive = this.applyInsufficientBalanceState(nowTs);
+        const postCloseActive = this.applyPostCloseCooldownState(nowTs);
+        const canEnter = !this.rateLimit.shouldBlockEntries() && !insufficientActive && !postCloseActive;
+        const boost = Math.max(1, Number(this.config.volumeBoost ?? 1));
+        const baseQty = this.config.tradeAmount * boost;
+        const maxInventoryMultiplier = Math.max(1, Number(this.config.maxInventoryMultiplier ?? 1));
+        const longExposure = position.positionAmt > 0 ? position.positionAmt : 0;
+        const shortExposure = position.positionAmt < 0 ? -position.positionAmt : 0;
+        const longCap = baseQty * maxInventoryMultiplier;
+        const shortCap = baseQty * maxInventoryMultiplier;
+        const buyQty = Math.min(baseQty, Math.max(0, longCap - longExposure));
+        const sellQty = Math.min(baseQty, Math.max(0, shortCap - shortExposure));
 
-      if (absPosition < EPS) {
-        this.entryPricePendingLogged = false;
-        if (canEnter) {
-          const boost = Math.max(1, Number(this.config.volumeBoost ?? 1));
-          desired.push({ side: "BUY", price: bidPrice, amount: this.config.tradeAmount * boost, reduceOnly: false });
-          desired.push({ side: "SELL", price: askPrice, amount: this.config.tradeAmount * boost, reduceOnly: false });
+        if (canEnter && baseQty > EPS) {
+          if (buyQty > EPS) {
+            desired.push({ side: "BUY", price: bidPrice, amount: buyQty, reduceOnly: false });
+          }
+          if (sellQty > EPS) {
+            desired.push({ side: "SELL", price: askPrice, amount: sellQty, reduceOnly: false });
+          }
         }
-      } else {
-        const closeSide: "BUY" | "SELL" = position.positionAmt > 0 ? "SELL" : "BUY";
-        const closePrice = closeSide === "SELL" ? closeAskPrice : closeBidPrice;
-        desired.push({ side: closeSide, price: closePrice, amount: absPosition, reduceOnly: true });
-      }
+
+        if (absPosition >= EPS) {
+          const closeSide: "BUY" | "SELL" = position.positionAmt > 0 ? "SELL" : "BUY";
+          const closePrice = closeSide === "SELL" ? closeAskPrice : closeBidPrice;
+          desired.push({ side: closeSide, price: closePrice, amount: absPosition, reduceOnly: true });
+        } else {
+          this.entryPricePendingLogged = false;
+        }
 
       this.desiredOrders = desired;
       this.logDesiredOrders(desired);

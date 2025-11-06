@@ -87,7 +87,8 @@ export async function deduplicateOrders(
   pendings: OrderPendingMap,
   type: string,
   side: string,
-  log: LogHandler
+  log: LogHandler,
+  reduceOnly?: boolean
 ): Promise<void> {
   // Treat STOP orders on some exchanges (e.g., Lighter) as LIMIT with stopPrice populated.
   const sameTypeOrders = openOrders.filter((o) => {
@@ -95,7 +96,9 @@ export async function deduplicateOrders(
     const isStopLike = Number.isFinite(Number(o.stopPrice)) && Number(o.stopPrice) > 0;
     const matchesStop = type === "STOP_MARKET" && isStopLike && o.side === side;
     const exactMatch = normalizedType === type && o.side === side;
-    return exactMatch || matchesStop;
+    const orderReduceOnly = o.reduceOnly === true;
+    const reduceOnlyMatches = typeof reduceOnly === "boolean" ? reduceOnly === orderReduceOnly : true;
+    return reduceOnlyMatches && (exactMatch || matchesStop);
   });
   if (sameTypeOrders.length <= 1) return;
   sameTypeOrders.sort((a, b) => {
@@ -159,7 +162,18 @@ export async function placeOrder(
   };
   if (reduceOnly) params.reduceOnly = "true";
   if (!opts?.skipDedupe) {
-    await deduplicateOrders(adapter, symbol, openOrders, locks, timers, pendings, type, side, log);
+    await deduplicateOrders(
+      adapter,
+      symbol,
+      openOrders,
+      locks,
+      timers,
+      pendings,
+      type,
+      side,
+      log,
+      reduceOnly
+    );
   }
   lockOperating(locks, timers, pendings, type, log);
   try {
@@ -202,7 +216,7 @@ export async function placeMarketOrder(
     quantity: roundQtyDownToStep(amount, qtyStep),
   };
   if (reduceOnly) params.reduceOnly = "true";
-  await deduplicateOrders(adapter, symbol, openOrders, locks, timers, pendings, type, side, log);
+  await deduplicateOrders(adapter, symbol, openOrders, locks, timers, pendings, type, side, log, reduceOnly);
   lockOperating(locks, timers, pendings, type, log);
   try {
     const order = await adapter.createOrder(params);
@@ -283,7 +297,7 @@ export async function placeStopLossOrder(
   // Acquire a short-lived creation lock to prevent duplicate stop orders within the same tick
   lockOperating(locks, timers, pendings, createType, log);
   try {
-    await deduplicateOrders(adapter, symbol, openOrders, locks, timers, pendings, dedupeType, side, log);
+    await deduplicateOrders(adapter, symbol, openOrders, locks, timers, pendings, dedupeType, side, log, true);
     // Hold STOP_MARKET namespace lock during create to suppress concurrent placements
     lockOperating(locks, timers, pendings, dedupeType, log);
     try {
@@ -335,7 +349,7 @@ export async function placeTrailingStopOrder(
     callbackRate,
     timeInForce: "GTC",
   };
-  await deduplicateOrders(adapter, symbol, openOrders, locks, timers, pendings, type, side, log);
+  await deduplicateOrders(adapter, symbol, openOrders, locks, timers, pendings, type, side, log, true);
   lockOperating(locks, timers, pendings, type, log);
   try {
     const order = await adapter.createOrder(params);
@@ -380,7 +394,7 @@ export async function marketClose(
     reduceOnly: "true",
   };
   
-  await deduplicateOrders(adapter, symbol, openOrders, locks, timers, pendings, type, side, log);
+  await deduplicateOrders(adapter, symbol, openOrders, locks, timers, pendings, type, side, log, true);
   lockOperating(locks, timers, pendings, type, log);
   try {
     const order = await adapter.createOrder(params);

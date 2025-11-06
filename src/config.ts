@@ -107,6 +107,7 @@ export interface MakerConfig {
   // OffsetMaker tuning: suppress frequent reprices and define min tick change
   repriceDwellMs?: number;
   minRepriceTicks?: number;
+  maxInventoryMultiplier: number;
 }
 
 export const makerConfig: MakerConfig = {
@@ -150,6 +151,15 @@ export const makerConfig: MakerConfig = {
       process.env.MAKER_MIN_REPRICE_TICKS ??
       process.env.MIN_REPRICE_TICKS,
     1
+  ),
+  maxInventoryMultiplier: Math.max(
+    1,
+    parseNumber(
+      process.env.MAKER_MAX_INVENTORY_MULTIPLIER ??
+        process.env.MAX_INVENTORY_MULTIPLIER ??
+        process.env.INVENTORY_MULTIPLIER,
+      1
+    )
   ),
 };
 
