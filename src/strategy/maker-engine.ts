@@ -305,32 +305,38 @@ export class MakerEngine {
         return;
       }
 
-      // 直接使用orderbook价格，格式化为字符串避免精度问题
-      const priceDecimals = Math.max(0, Math.floor(Math.log10(1 / this.config.priceTick)));
-      const closeBidPrice = formatPriceToString(topBid, priceDecimals);
-      const closeAskPrice = formatPriceToString(topAsk, priceDecimals);
-      const bidPrice = formatPriceToString(topBid - this.config.bidOffset, priceDecimals);
-      const askPrice = formatPriceToString(topAsk + this.config.askOffset, priceDecimals);
-      const position = getPosition(this.accountSnapshot, this.config.symbol);
-      const absPosition = Math.abs(position.positionAmt);
-      const desired: DesiredOrder[] = [];
-      const nowTs = Date.now();
-      const insufficientActive = this.applyInsufficientBalanceState(nowTs);
-      const postCloseActive = this.applyPostCloseCooldownState(nowTs);
-      const canEnter = !this.rateLimit.shouldBlockEntries() && !insufficientActive && !postCloseActive;
+        // 直接使用orderbook价格，格式化为字符串避免精度问题
+        const priceDecimals = Math.max(0, Math.floor(Math.log10(1 / this.config.priceTick)));
+        const closeBidPrice = formatPriceToString(topBid, priceDecimals);
+        const closeAskPrice = formatPriceToString(topAsk, priceDecimals);
+        const bidPrice = formatPriceToString(topBid - this.config.bidOffset, priceDecimals);
+        const askPrice = formatPriceToString(topAsk + this.config.askOffset, priceDecimals);
+        const position = getPosition(this.accountSnapshot, this.config.symbol);
+        const absPosition = Math.abs(position.positionAmt);
+        const desired: DesiredOrder[] = [];
+        const nowTs = Date.now();
+        const insufficientActive = this.applyInsufficientBalanceState(nowTs);
+        const postCloseActive = this.applyPostCloseCooldownState(nowTs);
+        const canEnter = !this.rateLimit.shouldBlockEntries() && !insufficientActive && !postCloseActive;
+        const boost = Math.max(1, Number(this.config.volumeBoost ?? 1));
+        const baseAmount = this.config.tradeAmount * boost;
 
-      if (absPosition < EPS) {
-        this.entryPricePendingLogged = false;
-        if (canEnter) {
-          const boost = Math.max(1, Number(this.config.volumeBoost ?? 1));
-          desired.push({ side: "BUY", price: bidPrice, amount: this.config.tradeAmount * boost, reduceOnly: false });
-          desired.push({ side: "SELL", price: askPrice, amount: this.config.tradeAmount * boost, reduceOnly: false });
+        if (absPosition < EPS) {
+          this.entryPricePendingLogged = false;
         }
-      } else {
-        const closeSide: "BUY" | "SELL" = position.positionAmt > 0 ? "SELL" : "BUY";
-        const closePrice = closeSide === "SELL" ? closeAskPrice : closeBidPrice;
-        desired.push({ side: closeSide, price: closePrice, amount: absPosition, reduceOnly: true });
-      }
+
+        if (canEnter && baseAmount > EPS) {
+          desired.push({ side: "BUY", price: bidPrice, amount: baseAmount, reduceOnly: false });
+          desired.push({ side: "SELL", price: askPrice, amount: baseAmount, reduceOnly: false });
+        }
+
+        if (absPosition > EPS) {
+          const closeSide: "BUY" | "SELL" = position.positionAmt > 0 ? "SELL" : "BUY";
+          const closePrice = closeSide === "SELL" ? closeAskPrice : closeBidPrice;
+          if (closePrice != null) {
+            desired.push({ side: closeSide, price: closePrice, amount: absPosition, reduceOnly: true });
+          }
+        }
 
       this.desiredOrders = desired;
       this.logDesiredOrders(desired);

@@ -301,27 +301,34 @@ export class OffsetMakerEngine {
       const closeAskPrice = formatPriceToString(finalAsk, priceDecimals);
       const bidPrice = formatPriceToString(finalBid - this.config.bidOffset, priceDecimals);
       const askPrice = formatPriceToString(finalAsk + this.config.askOffset, priceDecimals);
-      const absPosition = Math.abs(position.positionAmt);
-      const desired: DesiredOrder[] = [];
-      const nowTs = Date.now();
-      const postCloseActive = this.applyPostCloseCooldownState(nowTs);
-      const canEnter = !this.rateLimit.shouldBlockEntries() && !postCloseActive;
+        const absPosition = Math.abs(position.positionAmt);
+        const desired: DesiredOrder[] = [];
+        const nowTs = Date.now();
+        const postCloseActive = this.applyPostCloseCooldownState(nowTs);
+        const canEnter = !this.rateLimit.shouldBlockEntries() && !postCloseActive;
+        const boost = Math.max(1, Number(this.config.volumeBoost ?? 1));
+        const baseAmount = this.config.tradeAmount * boost;
 
-      if (absPosition < EPS) {
-        this.entryPricePendingLogged = false;
-        if (!skipBuySide && canEnter) {
-          const boost = Math.max(1, Number(this.config.volumeBoost ?? 1));
-          desired.push({ side: "BUY", price: bidPrice, amount: this.config.tradeAmount * boost, reduceOnly: false });
+        if (absPosition < EPS) {
+          this.entryPricePendingLogged = false;
         }
-        if (!skipSellSide && canEnter) {
-          const boost = Math.max(1, Number(this.config.volumeBoost ?? 1));
-          desired.push({ side: "SELL", price: askPrice, amount: this.config.tradeAmount * boost, reduceOnly: false });
+
+        if (canEnter && baseAmount > EPS) {
+          if (!skipBuySide) {
+            desired.push({ side: "BUY", price: bidPrice, amount: baseAmount, reduceOnly: false });
+          }
+          if (!skipSellSide) {
+            desired.push({ side: "SELL", price: askPrice, amount: baseAmount, reduceOnly: false });
+          }
         }
-      } else {
-        const closeSide: "BUY" | "SELL" = position.positionAmt > 0 ? "SELL" : "BUY";
-        const closePrice = closeSide === "SELL" ? closeAskPrice : closeBidPrice;
-        desired.push({ side: closeSide, price: closePrice, amount: absPosition, reduceOnly: true });
-      }
+
+        if (absPosition > EPS) {
+          const closeSide: "BUY" | "SELL" = position.positionAmt > 0 ? "SELL" : "BUY";
+          const closePrice = closeSide === "SELL" ? closeAskPrice : closeBidPrice;
+          if (closePrice != null) {
+            desired.push({ side: closeSide, price: closePrice, amount: absPosition, reduceOnly: true });
+          }
+        }
 
       this.desiredOrders = desired;
       this.sessionVolume.update(position, this.getReferencePrice());
