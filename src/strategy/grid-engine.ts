@@ -101,7 +101,7 @@ export class GridEngine {
   
   // Key-level suppression for (side:price:intent) to bridge WS latency windows
   private readonly pendingKeyUntil = new Map<string, number>();
-  static readonly PENDING_TTL_MS = 10_000;
+  static readonly PENDING_TTL_MS = 5_000; // Reduced from 10s to 5s for faster order placement in volatile markets
 
   private sidesLocked = false;
   private startupCleaned = false;
@@ -648,6 +648,14 @@ export class GridEngine {
       if ((cnt ?? 0) > 0) this.pendingKeyUntil.delete(k);
     }
 
+    // Clean up expired pendingKeyUntil entries to prevent memory leaks and allow faster retries
+    const nowTs = this.now();
+    for (const [key, until] of Array.from(this.pendingKeyUntil.entries())) {
+      if (until <= nowTs) {
+        this.pendingKeyUntil.delete(key);
+      }
+    }
+
     // Detect disappeared orders by id
     const disappeared: string[] = [];
     for (const id of this.prevActiveIds) {
@@ -904,27 +912,21 @@ export class GridEngine {
     this.desiredOrders = desired;
     let newOrdersPlaced = 0;
     const MAX_NEW_ORDERS_PER_TICK = 1;
-    for (const d of desired) {
-      if (newOrdersPlaced >= MAX_NEW_ORDERS_PER_TICK) break;
-      // Gate: avoid overlapping with coordinator pending LIMIT
-      if (this.pendings["LIMIT"]) {
-        this.log("info", "存在未完成的 LIMIT 操作，本轮不再下新单");
-        break;
-      }
-      // Gate: require either a new orders snapshot OR cooldown elapsed
-      const nowTs2 = this.now();
-      const needSnapshotUpdated = this.lastPlacementOrdersVersion === this.ordersVersion;
-      const inCooldown = nowTs2 - this.lastLimitAttemptAt < GridEngine.LIMIT_COOLDOWN_MS;
-      if (needSnapshotUpdated && inCooldown) {
-        // both conditions unmet: still waiting for either snapshot or cooldown
-        this.log("info", "等待订单快照或冷却结束再下单");
-        break;
-      }
-      // If a LIMIT operation is already pending (coordinator lock), skip issuing more this tick
-      if (this.pendings["LIMIT"]) {
-        this.log("info", "存在未完成的 LIMIT 操作，本轮不再下新单");
-        break;
-      }
+    // Gate: avoid overlapping with coordinator pending LIMIT (single check, not duplicated)
+    if (this.pendings["LIMIT"]) {
+      this.log("info", "存在未完成的 LIMIT 操作，本轮不再下新单");
+    } else {
+      for (const d of desired) {
+        if (newOrdersPlaced >= MAX_NEW_ORDERS_PER_TICK) break;
+        // Gate: require either a new orders snapshot OR cooldown elapsed
+        const nowTs2 = this.now();
+        const needSnapshotUpdated = this.lastPlacementOrdersVersion === this.ordersVersion;
+        const inCooldown = nowTs2 - this.lastLimitAttemptAt < GridEngine.LIMIT_COOLDOWN_MS;
+        if (needSnapshotUpdated && inCooldown) {
+          // both conditions unmet: still waiting for either snapshot or cooldown
+          this.log("info", "等待订单快照或冷却结束再下单");
+          break;
+        }
       const isClose = d.intent === "EXIT" || (d.side === "SELL" && this.isTargetOfPendingLong(d.level)) || (d.side === "BUY" && this.isTargetOfPendingShort(d.level));
       const intent: "ENTRY" | "EXIT" = isClose ? "EXIT" : "ENTRY";
       // Cap quantities: EXIT by remaining position; ENTRY by maxPositionSize guard
@@ -1002,6 +1004,7 @@ export class GridEngine {
         }
       } catch (error) {
         this.log("error", `挂单失败 (${d.side} @ ${d.price}): ${extractMessage(error)}`);
+      }
       }
     }
 

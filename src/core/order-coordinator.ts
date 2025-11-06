@@ -166,6 +166,9 @@ export async function placeOrder(
     const order = await adapter.createOrder(params);
     pendings[type] = String(order.orderId);
     log("order", `挂限价单: ${side} @ ${params.price} 数量 ${params.quantity} reduceOnly=${reduceOnly}`);
+    // Unlock immediately after successful order creation - don't wait for status updates
+    // The synchronizeLocks function in strategies will handle unlocking when order is filled/canceled
+    unlockOperating(locks, timers, pendings, type);
     return order;
   } catch (err) {
     unlockOperating(locks, timers, pendings, type);
@@ -208,6 +211,8 @@ export async function placeMarketOrder(
     const order = await adapter.createOrder(params);
     pendings[type] = String(order.orderId);
     log("order", `市价单: ${side} 数量 ${params.quantity} reduceOnly=${reduceOnly}`);
+    // Unlock immediately after successful order creation - don't wait for status updates
+    unlockOperating(locks, timers, pendings, type);
     return order;
   } catch (err) {
     unlockOperating(locks, timers, pendings, type);
@@ -290,6 +295,8 @@ export async function placeStopLossOrder(
       const order = await adapter.createOrder(params);
       pendings[dedupeType] = String(order.orderId);
       log("stop", `挂止损单: ${side} LIMIT @ ${params.price} stop=${params.stopPrice}`);
+      // Unlock STOP_MARKET lock immediately after successful order creation
+      unlockOperating(locks, timers, pendings, dedupeType);
       return order;
     } catch (err) {
       unlockOperating(locks, timers, pendings, dedupeType);
@@ -344,6 +351,8 @@ export async function placeTrailingStopOrder(
       "order",
       `挂动态止盈单: ${side} activation=${params.activationPrice} callbackRate=${callbackRate}`
     );
+    // Unlock immediately after successful order creation
+    unlockOperating(locks, timers, pendings, type);
     return order;
   } catch (err) {
     unlockOperating(locks, timers, pendings, type);
@@ -386,6 +395,8 @@ export async function marketClose(
     const order = await adapter.createOrder(params);
     pendings[type] = String(order.orderId);
     log("close", `市价平仓: ${side}`);
+    // Unlock immediately after successful order creation
+    unlockOperating(locks, timers, pendings, type);
   } catch (err) {
     unlockOperating(locks, timers, pendings, type);
     if (isUnknownOrderError(err)) {

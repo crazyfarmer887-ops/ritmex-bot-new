@@ -255,11 +255,18 @@ export class MakerEngine {
 
   private syncLocksWithOrders(orders: AsterOrder[] | null | undefined): void {
     const list = Array.isArray(orders) ? orders : [];
+    const FINAL = new Set(["FILLED", "CANCELED", "CANCELLED", "REJECTED", "EXPIRED"]);
     Object.keys(this.pending).forEach((type) => {
       const pendingId = this.pending[type];
       if (!pendingId) return;
       const match = list.find((order) => String(order.orderId) === pendingId);
-      if (!match || (match.status && match.status !== "NEW" && match.status !== "PARTIALLY_FILLED")) {
+      if (!match) {
+        // Order not found in open orders - likely filled or canceled, unlock
+        unlockOperating(this.locks, this.timers, this.pending, type);
+        return;
+      }
+      const status = String(match.status || "").toUpperCase();
+      if (FINAL.has(status)) {
         unlockOperating(this.locks, this.timers, this.pending, type);
       }
     });
