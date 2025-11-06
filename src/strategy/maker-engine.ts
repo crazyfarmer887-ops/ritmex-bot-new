@@ -165,9 +165,9 @@ export class MakerEngine {
         const absNow = Math.abs(position.positionAmt);
         const wasExposed = this.lastAbsPositionForCooldown > EPS;
         if (wasExposed && absNow <= EPS) {
-          this.postCloseCooldownUntil = Date.now() + 10_000;
+          this.postCloseCooldownUntil = Date.now() + 2000;
           this.postCloseCooldownNotified = false;
-          this.tradeLog.push("info", "平仓完成，暂停新开仓 10s");
+          this.tradeLog.push("info", "平仓完成，暂停新开仓 2s");
         }
         this.lastAbsPositionForCooldown = absNow;
         this.sessionVolume.update(position, this.getReferencePrice());

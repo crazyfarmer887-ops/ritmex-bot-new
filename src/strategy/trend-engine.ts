@@ -179,9 +179,9 @@ export class TrendEngine {
         const signChanged =
           prevExposure && currentExposure && Math.sign(prev.positionAmt) !== Math.sign(position.positionAmt);
         if (prevExposure && (!currentExposure || signChanged)) {
-          this.postCloseCooldownUntil = Date.now() + 10_000;
+          this.postCloseCooldownUntil = Date.now() + 2000;
           this.postCloseCooldownNotified = false;
-          this.tradeLog.push("info", "平仓完成，暂停新开仓 10s");
+          this.tradeLog.push("info", "平仓完成，暂停新开仓 2s");
         }
         this.trackPositionLifecycle(position, reference);
         this.emitUpdate();
