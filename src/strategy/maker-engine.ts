@@ -327,9 +327,18 @@ export class MakerEngine {
           desired.push({ side: "SELL", price: askPrice, amount: this.config.tradeAmount * boost, reduceOnly: false });
         }
       } else {
+        // Bidirectional mode: place close order and opposite side entry order
         const closeSide: "BUY" | "SELL" = position.positionAmt > 0 ? "SELL" : "BUY";
         const closePrice = closeSide === "SELL" ? closeAskPrice : closeBidPrice;
         desired.push({ side: closeSide, price: closePrice, amount: absPosition, reduceOnly: true });
+        
+        // Place entry order on opposite side to allow adding to position or reversing
+        if (canEnter) {
+          const boost = Math.max(1, Number(this.config.volumeBoost ?? 1));
+          const entrySide: "BUY" | "SELL" = position.positionAmt > 0 ? "BUY" : "SELL";
+          const entryPrice = entrySide === "BUY" ? bidPrice : askPrice;
+          desired.push({ side: entrySide, price: entryPrice, amount: this.config.tradeAmount * boost, reduceOnly: false });
+        }
       }
 
       this.desiredOrders = desired;
