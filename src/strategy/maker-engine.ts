@@ -319,17 +319,20 @@ export class MakerEngine {
       const postCloseActive = this.applyPostCloseCooldownState(nowTs);
       const canEnter = !this.rateLimit.shouldBlockEntries() && !insufficientActive && !postCloseActive;
 
-      if (absPosition < EPS) {
-        this.entryPricePendingLogged = false;
-        if (canEnter) {
-          const boost = Math.max(1, Number(this.config.volumeBoost ?? 1));
-          desired.push({ side: "BUY", price: bidPrice, amount: this.config.tradeAmount * boost, reduceOnly: false });
-          desired.push({ side: "SELL", price: askPrice, amount: this.config.tradeAmount * boost, reduceOnly: false });
-        }
-      } else {
+      // Bidirectional mode: always place both BUY and SELL orders when canEnter
+      if (canEnter) {
+        const boost = Math.max(1, Number(this.config.volumeBoost ?? 1));
+        desired.push({ side: "BUY", price: bidPrice, amount: this.config.tradeAmount * boost, reduceOnly: false });
+        desired.push({ side: "SELL", price: askPrice, amount: this.config.tradeAmount * boost, reduceOnly: false });
+      }
+
+      // Additionally, if there's a position, place a close order
+      if (absPosition >= EPS) {
         const closeSide: "BUY" | "SELL" = position.positionAmt > 0 ? "SELL" : "BUY";
         const closePrice = closeSide === "SELL" ? closeAskPrice : closeBidPrice;
         desired.push({ side: closeSide, price: closePrice, amount: absPosition, reduceOnly: true });
+      } else {
+        this.entryPricePendingLogged = false;
       }
 
       this.desiredOrders = desired;
