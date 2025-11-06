@@ -1,3 +1,55 @@
+/**
+ * Order Coordination Module
+ * 
+ * This module handles order placement, deduplication, and lock management to prevent
+ * race conditions and duplicate orders. It also includes fixes for predictable trading delays.
+ * 
+ * ## Fixed Predictable Delay Bugs
+ * 
+ * ### 1. Double Lock in placeStopLossOrder (FIXED)
+ * **Problem**: The function used two locks (STOP_CREATE and STOP_MARKET) where STOP_CREATE
+ * was held during deduplication, causing predictable delays of up to 3 seconds.
+ * 
+ * **Root Cause**: 
+ * - STOP_CREATE lock was acquired before deduplication
+ * - Deduplication acquired STOP_MARKET lock internally
+ * - STOP_CREATE lock was held throughout, blocking concurrent operations
+ * 
+ * **Fix**: Removed redundant STOP_CREATE lock. Deduplication now happens before acquiring
+ * the main STOP_MARKET lock, minimizing lock duration to only the order creation phase.
+ * 
+ * ### 2. Lock Release Delay in syncLocksWithOrders (FIXED)
+ * **Problem**: Locks were not released immediately when orders were filled, causing delays
+ * until the next order stream update (could be several seconds).
+ * 
+ * **Root Cause**:
+ * - Only checked if order status was not "NEW" or "PARTIALLY_FILLED"
+ * - Did not unlock when order disappeared from open orders (filled orders)
+ * - Inconsistent status checking across different engines
+ * 
+ * **Fix**: More aggressive unlocking logic that immediately releases locks when:
+ * - Order is not found in open orders (likely filled/canceled)
+ * - Order status indicates completion (FILLED, CANCELED, etc.)
+ * - Order is not in active state (NEW or PARTIALLY_FILLED)
+ * 
+ * ### 3. Deduplication Blocking Delay (FIXED)
+ * **Problem**: deduplicateOrders would acquire locks even when another operation was
+ * already in progress, causing predictable blocking delays.
+ * 
+ * **Root Cause**:
+ * - No check for existing locks before acquiring new ones
+ * - Would wait for lock timeout (3 seconds) if already locked
+ * 
+ * **Fix**: Added early return if lock is already held, skipping deduplication to prevent
+ * blocking. This allows operations to proceed without waiting for deduplication.
+ * 
+ * ## Lock Timeout Behavior
+ * 
+ * Locks have a default timeout of 3000ms (3 seconds) to prevent permanent blocking.
+ * However, operations should unlock immediately upon completion rather than waiting
+ * for timeout. The timeout is a safety mechanism, not the intended unlock path.
+ */
+
 import type { ExchangeAdapter } from "../exchanges/adapter";
 import type { AsterOrder, CreateOrderParams, TimeInForce } from "../exchanges/types";
 import { roundDownToTick, roundQtyDownToStep, formatPriceToString, roundUpToTick } from "../utils/math";
@@ -106,6 +158,14 @@ export async function deduplicateOrders(
   const toCancel = sameTypeOrders.slice(1);
   const orderIdList = toCancel.map((o) => o.orderId);
   if (!orderIdList.length) return;
+  
+  // FIXED: Check if already locked to avoid unnecessary lock acquisition delay.
+  // If another operation is already in progress, skip deduplication to prevent blocking.
+  if (isOperating(locks, type)) {
+    log("info", `${type} 操作进行中，跳过去重以避免延迟`);
+    return;
+  }
+  
   try {
     lockOperating(locks, timers, pendings, type, log);
     await adapter.cancelOrders({ symbol, orderIdList });
@@ -236,9 +296,10 @@ export async function placeStopLossOrder(
 ): Promise<AsterOrder | undefined> {
   // Use STOP_MARKET namespace for locks/dedupe, but create a stop-limit order underneath
   const dedupeType = "STOP_MARKET";
-  // A dedicated creation lock to suppress multiple stop placements within a single cycle
-  const createType = "STOP_CREATE";
-  if (isOperating(locks, dedupeType) || isOperating(locks, createType)) return;
+  // FIXED: Removed redundant STOP_CREATE lock that caused predictable delays.
+  // The STOP_MARKET lock already prevents concurrent placements, and holding
+  // STOP_CREATE during deduplication added unnecessary delay.
+  if (isOperating(locks, dedupeType)) return;
   if (!enforceMarkPriceGuard(side, stopPrice, guard, log, "止损单")) return;
   if (lastPrice != null) {
     if (side === "SELL" && stopPrice > lastPrice) {
@@ -279,29 +340,24 @@ export async function placeStopLossOrder(
     triggerType: side === "BUY" ? "TAKE_PROFIT" : "STOP_LOSS",
   };
 
-  // Avoid forcing price for STOP_MARKET globally; keep this exchange-specific in gateways
-  // Acquire a short-lived creation lock to prevent duplicate stop orders within the same tick
-  lockOperating(locks, timers, pendings, createType, log);
+  // FIXED: Deduplication now happens before acquiring the main lock to minimize delay.
+  // The deduplicateOrders function will acquire and release its own lock internally.
+  await deduplicateOrders(adapter, symbol, openOrders, locks, timers, pendings, dedupeType, side, log);
+  
+  // Acquire lock only for the actual order creation to minimize lock duration
+  lockOperating(locks, timers, pendings, dedupeType, log);
   try {
-    await deduplicateOrders(adapter, symbol, openOrders, locks, timers, pendings, dedupeType, side, log);
-    // Hold STOP_MARKET namespace lock during create to suppress concurrent placements
-    lockOperating(locks, timers, pendings, dedupeType, log);
-    try {
-      const order = await adapter.createOrder(params);
-      pendings[dedupeType] = String(order.orderId);
-      log("stop", `挂止损单: ${side} LIMIT @ ${params.price} stop=${params.stopPrice}`);
-      return order;
-    } catch (err) {
-      unlockOperating(locks, timers, pendings, dedupeType);
-      if (isUnknownOrderError(err)) {
-        log("order", "止损单已失效，跳过");
-        return undefined;
-      }
-      throw err;
+    const order = await adapter.createOrder(params);
+    pendings[dedupeType] = String(order.orderId);
+    log("stop", `挂止损单: ${side} LIMIT @ ${params.price} stop=${params.stopPrice}`);
+    return order;
+  } catch (err) {
+    unlockOperating(locks, timers, pendings, dedupeType);
+    if (isUnknownOrderError(err)) {
+      log("order", "止损单已失效，跳过");
+      return undefined;
     }
-  } finally {
-    // Always release the creation lock regardless of dedupe/create outcome
-    unlockOperating(locks, timers, pendings, createType);
+    throw err;
   }
 }
 

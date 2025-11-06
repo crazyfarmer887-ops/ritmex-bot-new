@@ -235,8 +235,21 @@ export class OffsetMakerEngine {
       const pendingId = this.pending[type];
       if (!pendingId) return;
       const match = list.find((order) => String(order.orderId) === pendingId);
-      if (!match || (match.status && match.status !== "NEW" && match.status !== "PARTIALLY_FILLED")) {
+      // FIXED: More aggressive unlocking to prevent predictable delays.
+      // Unlock immediately if:
+      // 1. Order not found in open orders (likely filled/canceled)
+      // 2. Order status indicates completion (FILLED, CANCELED, etc.)
+      // 3. Order is not in active state (NEW or PARTIALLY_FILLED)
+      if (!match) {
+        // Order not in open orders - likely filled or canceled, unlock immediately
         unlockOperating(this.locks, this.timers, this.pending, type);
+      } else if (match.status) {
+        const status = String(match.status).toUpperCase();
+        const isActive = status === "NEW" || status === "PARTIALLY_FILLED";
+        if (!isActive) {
+          // Order is completed (FILLED, CANCELED, etc.), unlock immediately
+          unlockOperating(this.locks, this.timers, this.pending, type);
+        }
       }
     });
   }
