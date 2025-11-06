@@ -103,7 +103,19 @@ export async function deduplicateOrders(
     const tb = a.updateTime || a.time || 0;
     return ta - tb;
   });
-  const toCancel = sameTypeOrders.slice(1);
+  const seenKeys = new Set<string>();
+  const toCancel = sameTypeOrders.filter((order) => {
+    const reduceOnly = order.reduceOnly === true;
+    const priceComponent = [order.price, order.stopPrice]
+      .map((value, index) => (value != null ? `${index === 0 ? "P" : "S"}:${String(value)}` : `${index === 0 ? "P" : "S"}:-`))
+      .join("|");
+    const key = `${order.side}|${reduceOnly ? "RO" : "NR"}|${priceComponent}`;
+    if (seenKeys.has(key)) {
+      return true;
+    }
+    seenKeys.add(key);
+    return false;
+  });
   const orderIdList = toCancel.map((o) => o.orderId);
   if (!orderIdList.length) return;
   try {
