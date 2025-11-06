@@ -101,7 +101,7 @@ export class GridEngine {
   
   // Key-level suppression for (side:price:intent) to bridge WS latency windows
   private readonly pendingKeyUntil = new Map<string, number>();
-  static readonly PENDING_TTL_MS = 10_000;
+  static readonly PENDING_TTL_MS = 5000;
 
   private sidesLocked = false;
   private startupCleaned = false;
@@ -145,7 +145,7 @@ export class GridEngine {
   private awaitingByLevel = new Map<number, { accountVerAtStart: number; absAtStart: number; ts: number }>();
   private lastPlacementOrdersVersion = -1;
   private lastLimitAttemptAt = 0;
-  static readonly LIMIT_COOLDOWN_MS = 3000;
+  static readonly LIMIT_COOLDOWN_MS = 1000;
 
   // Cooldown after full position close before allowing new entries
   private postCloseCooldownUntil = 0;
@@ -239,9 +239,9 @@ export class GridEngine {
         const absNow = Math.abs(nextPosition.positionAmt);
         const wasExposed = this.lastAbsPositionForCooldown > EPSILON;
         if (wasExposed && absNow <= EPSILON) {
-          this.postCloseCooldownUntil = this.now() + 10_000;
+          this.postCloseCooldownUntil = this.now() + 2000;
           this.postCloseCooldownNotified = false;
-          this.log("info", "平仓完成，暂停新开仓 10s");
+          this.log("info", "平仓完成，暂停新开仓 2s");
         }
         this.lastAbsPositionForCooldown = absNow;
         this.position = nextPosition;
@@ -535,9 +535,24 @@ export class GridEngine {
   private async syncGridSimple(price: number): Promise<void> {
     // 启动撤单未完成前，禁止铺网/下单，避免新单被启动撤单冲掉造成“消失待判定”
     if (!this.startupCancelDone) {
-      this.log("info", "启动撤单未完成，等待后再部网");
-      this.lastUpdated = this.now();
-      return;
+      if (this.startupCancelPromise) {
+        const timeoutPromise = new Promise<void>((resolve) => {
+          setTimeout(() => resolve(), 5000);
+        });
+        try {
+          await Promise.race([this.startupCancelPromise, timeoutPromise]);
+        } catch {}
+      }
+      // If still not done after timeout, proceed to avoid indefinite blocking
+      if (!this.startupCancelDone && this.initialOrderSnapshotReady) {
+        this.log("warn", "启动撤单超时，继续执行网格逻辑");
+        this.startupCancelDone = true;
+      }
+      if (!this.startupCancelDone) {
+        this.log("info", "启动撤单未完成，等待后再部网");
+        this.lastUpdated = this.now();
+        return;
+      }
     }
     // --- 0) If there is an existing net position, enforce "exit-first" before any ENTRY ---
     const hasNetLong = this.position.positionAmt > EPSILON;
@@ -726,7 +741,7 @@ export class GridEngine {
     if (this.awaitingByLevel.size) {
       for (const [level, info] of Array.from(this.awaitingByLevel.entries())) {
         // timeout fallback: if no account delta for long time, treat as canceled/no-op
-        if (this.now() - info.ts > 8000) {
+        if (this.now() - info.ts > 3000) {
           this.awaitingByLevel.delete(level);
           continue;
         }
@@ -918,11 +933,6 @@ export class GridEngine {
       if (needSnapshotUpdated && inCooldown) {
         // both conditions unmet: still waiting for either snapshot or cooldown
         this.log("info", "等待订单快照或冷却结束再下单");
-        break;
-      }
-      // If a LIMIT operation is already pending (coordinator lock), skip issuing more this tick
-      if (this.pendings["LIMIT"]) {
-        this.log("info", "存在未完成的 LIMIT 操作，本轮不再下新单");
         break;
       }
       const isClose = d.intent === "EXIT" || (d.side === "SELL" && this.isTargetOfPendingLong(d.level)) || (d.side === "BUY" && this.isTargetOfPendingShort(d.level));
@@ -1287,9 +1297,15 @@ export class GridEngine {
     if (this.initialCloseHandled) return;
     if (!(this.feedStatus.account && this.feedStatus.orders && (this.feedStatus.ticker || this.feedStatus.depth))) return;
     // Wait for startup cancel barrier to avoid racing with initial close
+    // Add timeout fallback to prevent indefinite blocking
     if (!this.startupCancelDone) {
       if (this.startupCancelPromise) {
-        try { await this.startupCancelPromise; } catch {}
+        const timeoutPromise = new Promise<void>((resolve) => {
+          setTimeout(() => resolve(), 5000);
+        });
+        try {
+          await Promise.race([this.startupCancelPromise, timeoutPromise]);
+        } catch {}
       }
       if (!this.startupCancelDone) return;
     }

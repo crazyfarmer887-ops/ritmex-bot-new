@@ -51,7 +51,7 @@ export function lockOperating(
   pendings: OrderPendingMap,
   type: string,
   log: LogHandler,
-  timeout = 3000
+  timeout = 10000
 ): void {
   locks[type] = true;
   if (timers[type]) {

@@ -4,8 +4,8 @@ type RateLimitState = "normal" | "degraded" | "paused";
 
 export type RateLimitDecision = "run" | "skip" | "paused";
 
-const DEFAULT_PAUSE_MS = 30_000;
-const DEFAULT_RECOVERY_MS = 60_000;
+const DEFAULT_PAUSE_MS = 15_000;
+const DEFAULT_RECOVERY_MS = 30_000;
 
 export class RateLimitController {
   private state: RateLimitState = "normal";
