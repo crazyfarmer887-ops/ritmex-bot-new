@@ -319,17 +319,21 @@ export class MakerEngine {
       const postCloseActive = this.applyPostCloseCooldownState(nowTs);
       const canEnter = !this.rateLimit.shouldBlockEntries() && !insufficientActive && !postCloseActive;
 
-      if (absPosition < EPS) {
+      // 양방향 모드: 포지션 유무와 관계없이 항상 양쪽 호가 제공
+      if (canEnter) {
+        const boost = Math.max(1, Number(this.config.volumeBoost ?? 1));
+        desired.push({ side: "BUY", price: bidPrice, amount: this.config.tradeAmount * boost, reduceOnly: false });
+        desired.push({ side: "SELL", price: askPrice, amount: this.config.tradeAmount * boost, reduceOnly: false });
+      }
+
+      // 포지션이 있는 경우 추가로 평가 주문도 함께 제공
+      if (absPosition >= EPS) {
         this.entryPricePendingLogged = false;
-        if (canEnter) {
-          const boost = Math.max(1, Number(this.config.volumeBoost ?? 1));
-          desired.push({ side: "BUY", price: bidPrice, amount: this.config.tradeAmount * boost, reduceOnly: false });
-          desired.push({ side: "SELL", price: askPrice, amount: this.config.tradeAmount * boost, reduceOnly: false });
-        }
-      } else {
         const closeSide: "BUY" | "SELL" = position.positionAmt > 0 ? "SELL" : "BUY";
         const closePrice = closeSide === "SELL" ? closeAskPrice : closeBidPrice;
         desired.push({ side: closeSide, price: closePrice, amount: absPosition, reduceOnly: true });
+      } else {
+        this.entryPricePendingLogged = false;
       }
 
       this.desiredOrders = desired;
