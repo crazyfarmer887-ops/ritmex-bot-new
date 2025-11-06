@@ -2,6 +2,7 @@ import type {
   AccountListener,
   DepthListener,
   ExchangeAdapter,
+  FillListener,
   KlineListener,
   OrderListener,
   TickerListener,
@@ -105,6 +106,13 @@ export class AsterExchangeAdapter implements ExchangeAdapter {
     void this.ensureInitialized("watchOrders");
     this.gateway.onOrders(this.safeInvoke("watchOrders", (orders) => {
       cb(orders);
+    }));
+  }
+
+  watchFills(cb: FillListener): void {
+    void this.ensureInitialized("watchFills");
+    this.gateway.onFills(this.safeInvoke("watchFills", (fill) => {
+      cb(fill);
     }));
   }
 

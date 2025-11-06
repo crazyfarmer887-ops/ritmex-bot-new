@@ -268,6 +268,22 @@ export class TrendEngine {
         processFail: (error) => `K线推送处理异常: ${extractMessage(error)}`,
       }
     );
+
+      if (typeof this.exchange.watchFills === "function") {
+        safeSubscribe(
+          this.exchange.watchFills.bind(this.exchange),
+          (fill) => {
+            if (!fill) return;
+            if (fill.symbol && fill.symbol.toUpperCase() !== this.config.symbol.toUpperCase()) return;
+            this.sessionVolume.registerFill(fill);
+          },
+          log,
+          {
+            subscribeFail: (error) => `订阅成交失败: ${String(error)}`,
+            processFail: (error) => `成交推送处理异常: ${extractMessage(error)}`,
+          }
+        );
+      }
   }
 
   private synchronizeLocks(orders: AsterOrder[] | null | undefined): void {

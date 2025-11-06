@@ -2,6 +2,7 @@ import type {
   AccountListener,
   DepthListener,
   ExchangeAdapter,
+  FillListener,
   KlineListener,
   OrderListener,
   TickerListener,
@@ -68,6 +69,10 @@ export class BackpackExchangeAdapter implements ExchangeAdapter {
   watchOrders(cb: OrderListener): void {
     void this.ensureInitialized("watchOrders");
     this.gateway.onOrders(this.safeInvoke("watchOrders", cb));
+  }
+
+  watchFills(_cb: FillListener): void {
+    // Backpack gateway currently does not deliver fill streams.
   }
 
   watchDepth(_symbol: string, cb: DepthListener): void {

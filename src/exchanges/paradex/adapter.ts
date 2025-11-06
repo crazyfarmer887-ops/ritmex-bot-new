@@ -3,6 +3,7 @@ import type {
   AccountListener,
   DepthListener,
   ExchangeAdapter,
+  FillListener,
   KlineListener,
   OrderListener,
   TickerListener,
@@ -68,6 +69,10 @@ export class ParadexExchangeAdapter implements ExchangeAdapter {
   watchOrders(cb: OrderListener): void {
     void this.ensureInitialized("watchOrders");
     this.gateway.onOrders(this.safeInvoke("watchOrders", cb));
+  }
+
+  watchFills(_cb: FillListener): void {
+    // Paradex gateway does not support per-fill streams yet.
   }
 
   watchDepth(symbol: string, cb: DepthListener): void {

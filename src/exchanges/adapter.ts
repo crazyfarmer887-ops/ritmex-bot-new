@@ -5,6 +5,7 @@ import type {
   AsterTicker,
   AsterKline,
   CreateOrderParams,
+  OrderFill,
 } from "./types";
 
 export interface AccountListener {
@@ -27,11 +28,16 @@ export interface KlineListener {
   (klines: AsterKline[]): void;
 }
 
+export interface FillListener {
+  (fill: OrderFill): void;
+}
+
 export interface ExchangeAdapter {
   readonly id: string;
   supportsTrailingStops(): boolean;
   watchAccount(cb: AccountListener): void;
   watchOrders(cb: OrderListener): void;
+  watchFills?(cb: FillListener): void;
   watchDepth(symbol: string, cb: DepthListener): void;
   watchTicker(symbol: string, cb: TickerListener): void;
   watchKlines(symbol: string, interval: string, cb: KlineListener): void;

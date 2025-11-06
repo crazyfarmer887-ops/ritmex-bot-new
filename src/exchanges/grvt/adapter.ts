@@ -5,6 +5,7 @@ import type {
   AccountListener,
   DepthListener,
   ExchangeAdapter,
+  FillListener,
   KlineListener,
   OrderListener,
   TickerListener,
@@ -105,6 +106,10 @@ export class GrvtExchangeAdapter implements ExchangeAdapter {
   watchOrders(cb: OrderListener): void {
     void this.ensureInitialized("watchOrders");
     this.gateway.onOrders(this.safeInvoke("watchOrders", cb));
+  }
+
+  watchFills(_cb: FillListener): void {
+    // GRVT gateway does not expose incremental fill events yet.
   }
 
   watchDepth(_symbol: string, cb: DepthListener): void {

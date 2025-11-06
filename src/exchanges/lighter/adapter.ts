@@ -2,6 +2,7 @@ import type {
   AccountListener,
   DepthListener,
   ExchangeAdapter,
+  FillListener,
   KlineListener,
   OrderListener,
   TickerListener,
@@ -84,6 +85,10 @@ export class LighterExchangeAdapter implements ExchangeAdapter {
   watchOrders(handler: OrderListener): void {
     void this.ensureInitialized("watchOrders");
     this.gateway.onOrders(handler);
+  }
+
+  watchFills(_handler: FillListener): void {
+    // Lighter gateway does not emit per-fill events yet.
   }
 
   watchDepth(_symbol: string, handler: DepthListener): void {

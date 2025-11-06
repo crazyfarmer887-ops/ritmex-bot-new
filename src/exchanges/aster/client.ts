@@ -22,6 +22,7 @@ import type {
   CancelSpotOrderParams,
   CreateOrderParams,
   CreateSpotOrderParams,
+  OrderFill,
   PositionSide,
   QuerySpotOrderParams,
   SpotAllOrdersParams,
@@ -680,6 +681,60 @@ function toOrderFromEvent(event: any): AsterOrder {
   };
 }
 
+function toFillFromEvent(event: any): OrderFill | null {
+  if (!event) return null;
+  const execType = String(event.x ?? "").toUpperCase();
+  if (execType !== "TRADE") return null;
+
+  const lastQtyRaw = Number(event.l ?? event.z ?? 0);
+  if (!Number.isFinite(lastQtyRaw) || Math.abs(lastQtyRaw) <= 0) return null;
+  const quantity = lastQtyRaw;
+
+  const priceCandidates = [event.L, event.ap, event.p];
+  let tradePrice = 0;
+  for (const candidate of priceCandidates) {
+    const numeric = Number(candidate);
+    if (Number.isFinite(numeric) && Math.abs(numeric) > 0) {
+      tradePrice = numeric;
+      break;
+    }
+  }
+
+  const quoteCandidates = [event.Y, event.Z, event.cumQuote, event.cq];
+  let quoteNotional = 0;
+  for (const candidate of quoteCandidates) {
+    const numeric = Number(candidate);
+    if (Number.isFinite(numeric) && Math.abs(numeric) > 0) {
+      quoteNotional = Math.abs(numeric);
+      break;
+    }
+  }
+  if (quoteNotional === 0 && Math.abs(tradePrice) > 0) {
+    quoteNotional = Math.abs(tradePrice) * Math.abs(quantity);
+  }
+
+  const symbol = String(event.s ?? "").toUpperCase();
+  if (!symbol) return null;
+  const orderId = String(event.i ?? "");
+  const tradeId = event.t != null ? String(event.t) : `${orderId}:${event.T ?? Date.now()}`;
+  const timestamp = Number(event.T ?? event.E ?? Date.now());
+  const side = (event.S ?? "BUY") as OrderFill["side"];
+
+  return {
+    id: `${symbol}:${tradeId}`,
+    orderId,
+    symbol,
+    side,
+    quantity,
+    price: tradePrice,
+    quote: quoteNotional,
+    timestamp,
+    isMaker: Boolean(event.m),
+    fee: Number(event.n ?? 0) || undefined,
+    feeAsset: event.N,
+  };
+}
+
 function toPositionFromRisk(raw: any): AsterAccountPosition {
   const positionSide = String(raw.positionSide ?? raw.ps ?? "BOTH").toUpperCase() as PositionSide;
   return {
@@ -1292,6 +1347,7 @@ export class AsterGateway {
 
   private readonly accountEvent = new SimpleEvent<AsterAccountSnapshot>();
   private readonly ordersEvent = new SimpleEvent<AsterOrder[]>();
+  private readonly fillsEvent = new SimpleEvent<OrderFill>();
   private readonly depthEvents = new Map<string, SimpleEvent<AsterDepth>>();
   private readonly tickerEvents = new Map<string, SimpleEvent<AsterTicker>>();
   private readonly klineEvents = new Map<string, SimpleEvent<AsterKline[]>>();
@@ -1306,23 +1362,27 @@ export class AsterGateway {
     this.rest = new AsterRestClient(options);
     this.publicStreams = new AsterPublicStreams();
     this.userStream = new AsterUserStream(this.rest);
-    this.userStream.onAccount((event) => {
-      const updated = updateAccountSnapshot(this.accountSnapshot, event);
-      if (updated) {
-        this.accountSnapshot = updated;
-        this.accountEvent.emit(updated);
-      }
-    });
-    this.userStream.onOrder((event) => {
-      const order = toOrderFromEvent(event.payload);
-      mergeOrderSnapshot(this.openOrders, order);
-      this.ordersEvent.emit(Array.from(this.openOrders.values()));
-      const execType = typeof event.payload?.x === "string" ? event.payload.x.toUpperCase() : "";
-      const status = typeof event.payload?.X === "string" ? event.payload.X.toUpperCase() : "";
-      if (execType === "TRADE" || status === "FILLED" || status === "PARTIALLY_FILLED") {
-        void this.refreshPositions();
-      }
-    });
+      this.userStream.onAccount((event) => {
+        const updated = updateAccountSnapshot(this.accountSnapshot, event);
+        if (updated) {
+          this.accountSnapshot = updated;
+          this.accountEvent.emit(updated);
+        }
+      });
+      this.userStream.onOrder((event) => {
+        const order = toOrderFromEvent(event.payload);
+        const fill = toFillFromEvent(event.payload);
+        if (fill) {
+          this.fillsEvent.emit(fill);
+        }
+        mergeOrderSnapshot(this.openOrders, order);
+        this.ordersEvent.emit(Array.from(this.openOrders.values()));
+        const execType = typeof event.payload?.x === "string" ? event.payload.x.toUpperCase() : "";
+        const status = typeof event.payload?.X === "string" ? event.payload.X.toUpperCase() : "";
+        if (execType === "TRADE" || status === "FILLED" || status === "PARTIALLY_FILLED") {
+          void this.refreshPositions();
+        }
+      });
     this.userStream.onConnect(() => {
       void this.refreshSnapshots();
     });
@@ -1351,6 +1411,10 @@ export class AsterGateway {
   onOrders(listener: (orders: AsterOrder[]) => void): void {
     this.ordersEvent.add(listener);
     listener(Array.from(this.openOrders.values()));
+  }
+
+  onFills(listener: (fill: OrderFill) => void): void {
+    this.fillsEvent.add(listener);
   }
 
   onDepth(symbol: string, listener: (depth: AsterDepth) => void): void {

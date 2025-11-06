@@ -589,3 +589,17 @@ export interface AsterOrder {
   priceRate?: string;
   priceProtect?: boolean;
 }
+
+export interface OrderFill {
+  id: string;
+  orderId: string;
+  symbol: string;
+  side: OrderSide;
+  quantity: number;
+  price: number;
+  quote: number;
+  timestamp: number;
+  isMaker?: boolean;
+  fee?: number;
+  feeAsset?: string;
+}
