@@ -51,6 +51,7 @@ export interface BingxGatewayOptions {
   symbol: string;
   leverage: number;
   marginMode?: string;
+  positionMode?: "HEDGE" | "ONE_WAY";
   testnet?: boolean;
   logger?: (context: string, error: unknown) => void;
 }
@@ -60,6 +61,8 @@ export class BingxGateway {
   private readonly symbol: string;
   private readonly leverage: number;
   private readonly marginMode: string;
+  private readonly positionModePreference: "HEDGE" | "ONE_WAY" | null;
+  private positionMode: "HEDGE" | "ONE_WAY" | "UNKNOWN" = "UNKNOWN";
   private readonly logger: (context: string, error: unknown) => void;
   private marketSymbol: string;
   private market: any | null = null;
@@ -90,6 +93,8 @@ export class BingxGateway {
     this.symbol = normalizedSymbol;
     this.leverage = Number.isFinite(options.leverage) && options.leverage > 0 ? options.leverage : 50;
     this.marginMode = (options.marginMode ?? "ISOLATED").toUpperCase();
+    this.positionModePreference = this.parsePositionMode(options.positionMode);
+    this.positionMode = this.positionModePreference ?? "UNKNOWN";
     this.logger = options.logger ?? ((context, error) => console.error(`[BingxGateway] ${context}:`, error));
     this.marketSymbol = this.symbol;
 
@@ -187,7 +192,10 @@ export class BingxGateway {
     if (params.closePosition !== undefined) {
       extraParams.closePosition = params.closePosition === "true";
     }
-    extraParams.positionSide = "BOTH";
+    const positionSide = this.resolvePositionSide(params);
+    if (positionSide) {
+      extraParams.positionSide = positionSide;
+    }
     extraParams.marginMode = this.marginMode.toLowerCase();
 
     let ccxtType: string;
@@ -267,6 +275,7 @@ export class BingxGateway {
     this.marketSymbol = market.symbol;
 
     await this.configureLeverage();
+    await this.detectPositionMode();
     this.initialized = true;
   }
 
@@ -287,6 +296,140 @@ export class BingxGateway {
     } catch (error) {
       this.logger("setLeverage", error);
     }
+  }
+
+  private async detectPositionMode(): Promise<void> {
+    if (this.positionModePreference) return;
+    try {
+      if (typeof this.exchange.fetchPositions !== "function") return;
+      let positions = await this.exchange.fetchPositions([this.marketSymbol]);
+      if (!Array.isArray(positions) || positions.length === 0) {
+        positions = await this.exchange.fetchPositions();
+      }
+      const detected = this.resolvePositionModeFromPositions(positions ?? []);
+      this.applyDetectedPositionMode(detected);
+    } catch (error) {
+      this.logger("detectPositionMode", error);
+    }
+  }
+
+  private resolvePositionModeFromPositions(rawPositions: any[]): "HEDGE" | "ONE_WAY" | null {
+    if (!Array.isArray(rawPositions)) return null;
+    let sawOneWay = false;
+    for (const raw of rawPositions) {
+      const mode = this.detectModeFromRaw(raw);
+      if (mode === "HEDGE") {
+        return "HEDGE";
+      }
+      if (mode === "ONE_WAY") {
+        sawOneWay = true;
+      }
+    }
+    return sawOneWay ? "ONE_WAY" : null;
+  }
+
+  private detectModeFromRaw(raw: any): "HEDGE" | "ONE_WAY" | null {
+    const info = raw?.info ?? raw ?? {};
+    const candidates = [
+      info.positionSide,
+      raw?.positionSide,
+      info.side,
+      raw?.side,
+      info.position_mode,
+      info.positionMode,
+      info.dualSidePosition,
+      info.dualPosition,
+      info.dualSide,
+      info.positionSideMode,
+      info.marginMode,
+      info.margin_mode,
+    ];
+    for (const candidate of candidates) {
+      const classified = this.classifyModeValue(candidate);
+      if (classified) return classified;
+    }
+    return null;
+  }
+
+  private classifyModeValue(value: unknown): "HEDGE" | "ONE_WAY" | null {
+    if (value === undefined || value === null) return null;
+    const normalized = String(value).trim().toUpperCase();
+    if (!normalized) return null;
+    if (normalized === "LONG" || normalized === "SHORT" || normalized === "DUAL" || normalized === "DUAL_SIDE") {
+      return "HEDGE";
+    }
+    if (normalized.includes("DUAL")) return "HEDGE";
+    if (normalized.includes("HEDGE")) return "HEDGE";
+    if (normalized === "BOTH") return "ONE_WAY";
+    if (normalized === "HEDGE") return "HEDGE";
+    if (
+      normalized === "ONEWAY" ||
+      normalized === "ONE_WAY" ||
+      normalized === "SINGLE" ||
+      normalized === "SINGLE_SIDE" ||
+      normalized.includes("ONE-WAY") ||
+      normalized.includes("ONEWAY")
+    ) {
+      return "ONE_WAY";
+    }
+    return null;
+  }
+
+  private applyDetectedPositionMode(mode: "HEDGE" | "ONE_WAY" | null): void {
+    if (!mode || this.positionModePreference) return;
+    if (mode === "HEDGE") {
+      this.positionMode = "HEDGE";
+    } else if (this.positionMode === "UNKNOWN") {
+      this.positionMode = "ONE_WAY";
+    }
+  }
+
+  private updatePositionModeFromRaw(raw: any): void {
+    if (this.positionModePreference) return;
+    const detected = this.detectModeFromRaw(raw);
+    this.applyDetectedPositionMode(detected);
+  }
+
+  private parsePositionMode(mode?: string | null): "HEDGE" | "ONE_WAY" | null {
+    if (!mode) return null;
+    const normalized = mode.toString().trim().toUpperCase();
+    if (!normalized) return null;
+    if (normalized === "HEDGE" || normalized === "DUAL" || normalized === "DUAL_SIDE" || normalized === "DUAL_SIDE_POSITION") {
+      return "HEDGE";
+    }
+    if (normalized === "ONE_WAY" || normalized === "ONEWAY" || normalized === "SINGLE" || normalized === "BOTH") {
+      return "ONE_WAY";
+    }
+    return null;
+  }
+
+  private normalizePositionSideValue(value: unknown): PositionSide | undefined {
+    if (value === undefined || value === null) return undefined;
+    const normalized = String(value).trim().toUpperCase();
+    if (normalized === "LONG" || normalized === "SHORT" || normalized === "BOTH") {
+      return normalized as PositionSide;
+    }
+    return undefined;
+  }
+
+  private resolvePositionSide(params: CreateOrderParams): PositionSide | undefined {
+    const explicit = this.normalizePositionSideValue(params.positionSide);
+    if (explicit) {
+      return explicit;
+    }
+    const mode = this.positionModePreference ?? this.positionMode;
+    if (mode === "ONE_WAY") {
+      return "BOTH";
+    }
+    if (mode === "HEDGE") {
+      const shouldReduce = params.reduceOnly === "true" || params.closePosition === "true";
+      const side = params.side.toUpperCase() === "SELL" ? "SELL" : "BUY";
+      if (shouldReduce) {
+        return side === "BUY" ? "SHORT" : "LONG";
+      }
+      return side === "BUY" ? "LONG" : "SHORT";
+    }
+    return undefined;
   }
 
   private findMarket(requested: string): any | null {
@@ -491,6 +634,7 @@ export class BingxGateway {
   }
 
   private mapPosition(raw: any, now: number) {
+    this.updatePositionModeFromRaw(raw);
     const info = raw?.info ?? raw ?? {};
     const size = this.toNumber(raw?.contracts ?? raw?.positionAmt ?? info.positionAmt ?? info.position ?? 0);
     const sideRaw = String(raw?.side ?? info.side ?? "").toUpperCase();
@@ -580,6 +724,17 @@ export class BingxGateway {
     const cumQuote = this.pickString([order.cost, info.executedQuoteQuantity]);
     const timestamp = order.timestamp ?? Date.now();
     const reduceOnly = Boolean(order.reduceOnly ?? info.reduceOnly ?? false);
+    const fallbackSide =
+      (this.positionModePreference ?? this.positionMode) === "HEDGE"
+        ? (side === "BUY" ? "LONG" : "SHORT")
+        : "BOTH";
+    const positionSide =
+      this.normalizePositionSideValue(
+        (info.positionSide as string | undefined) ??
+          (info.position_side as string | undefined) ??
+          (info.ps as string | undefined) ??
+          ((order as any).positionSide as string | undefined)
+      ) ?? fallbackSide;
 
     return {
       orderId: String(order.id ?? ""),
@@ -598,7 +753,7 @@ export class BingxGateway {
       closePosition: Boolean(info.closePosition ?? false),
       avgPrice,
       cumQuote,
-      positionSide: "BOTH",
+      positionSide,
     };
   }
 
