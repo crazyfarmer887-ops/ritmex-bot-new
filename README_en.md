@@ -28,6 +28,7 @@ A Bun-powered multi-exchange perpetuals workstation that ships an SMA30 trend en
 | GRVT | USDT perpetuals | `GRVT_API_KEY`, `GRVT_API_SECRET`, `GRVT_SUB_ACCOUNT_ID` | Switch `GRVT_ENV` between `prod` and `testnet` |
 | Lighter | zkLighter perpetuals | `LIGHTER_ACCOUNT_INDEX`, `LIGHTER_API_PRIVATE_KEY` | Defaults to `LIGHTER_ENV=testnet` |
 | Backpack | USDC perpetuals | `BACKPACK_API_KEY`, `BACKPACK_API_SECRET`, `BACKPACK_PASSWORD` | Set `BACKPACK_SANDBOX=true` for the sandbox |
+| BingX | USDT perpetuals | `BINGX_API_KEY`, `BINGX_API_SECRET` | Defaults to `BTCUSDT` and attempts to set 50x leverage during init |
 | Paradex | StarkEx perpetuals | `PARADEX_PRIVATE_KEY`, `PARADEX_WALLET_ADDRESS` | Toggle `PARADEX_SANDBOX=true` for the testnet |
 
 ## Requirements

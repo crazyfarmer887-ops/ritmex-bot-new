@@ -10,11 +10,12 @@ import type {
 } from "./order-schema";
 import * as asterOrders from "./aster/order";
 import * as backpackOrders from "./backpack/order";
+import * as bingxOrders from "./bingx/order";
 import * as grvtOrders from "./grvt/order";
 import * as lighterOrders from "./lighter/order";
 import * as paradexOrders from "./paradex/order";
 
-type ExchangeKey = "aster" | "backpack" | "grvt" | "lighter" | "paradex";
+type ExchangeKey = "aster" | "backpack" | "bingx" | "grvt" | "lighter" | "paradex";
 
 interface ExchangeOrderHandlers {
   limit(intent: LimitOrderIntent): Promise<AsterOrder>;
@@ -46,6 +47,13 @@ const handlerMap: Record<ExchangeKey, ExchangeOrderHandlers> = {
     trailingStop: grvtOrders.createTrailingStopOrder,
     close: grvtOrders.createClosePositionOrder,
   },
+  bingx: {
+    limit: bingxOrders.createLimitOrder,
+    market: bingxOrders.createMarketOrder,
+    stop: bingxOrders.createStopOrder,
+    trailingStop: bingxOrders.createTrailingStopOrder,
+    close: bingxOrders.createClosePositionOrder,
+  },
   lighter: {
     limit: lighterOrders.createLimitOrder,
     market: lighterOrders.createMarketOrder,
@@ -62,7 +70,7 @@ const handlerMap: Record<ExchangeKey, ExchangeOrderHandlers> = {
   },
 };
 
-const knownExchanges: ExchangeKey[] = ["aster", "backpack", "grvt", "lighter", "paradex"];
+const knownExchanges: ExchangeKey[] = ["aster", "backpack", "bingx", "grvt", "lighter", "paradex"];
 
 function normalizeExchangeId(value: string | undefined | null): string | undefined {
   if (!value) return undefined;

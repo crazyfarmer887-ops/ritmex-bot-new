@@ -31,6 +31,7 @@
 | GRVT | USDT 永续 | `GRVT_API_KEY`, `GRVT_API_SECRET`, `GRVT_SUB_ACCOUNT_ID` | `GRVT_ENV` 可切换 `prod`/`testnet`
 | Lighter | zkLighter 永续 | `LIGHTER_ACCOUNT_INDEX`, `LIGHTER_API_PRIVATE_KEY` | 默认 `LIGHTER_ENV=testnet`
 | Backpack | USDC 永续 | `BACKPACK_API_KEY`, `BACKPACK_API_SECRET`, `BACKPACK_PASSWORD` | `BACKPACK_SANDBOX=true` 启用沙盒
+| BingX | USDT 永续 | `BINGX_API_KEY`, `BINGX_API_SECRET` | 默认交易对 `BTCUSDT`，初始化时自动尝试设置 50x 杠杆
 | Paradex | StarkEx 永续 | `PARADEX_PRIVATE_KEY`, `PARADEX_WALLET_ADDRESS` | `PARADEX_SANDBOX=true` 使用测试网
 
 ## 系统要求
