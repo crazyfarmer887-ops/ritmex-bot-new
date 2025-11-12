@@ -35,7 +35,7 @@ export class BingxExchangeAdapter implements ExchangeAdapter {
       credentials.leverage ??
       parseOptionalNumber(process.env.BINGX_LEVERAGE) ??
       50;
-    const marginMode = credentials.marginMode ?? process.env.BINGX_MARGIN_MODE ?? "ISOLATED";
+    const marginMode = normalizeMarginMode(credentials.marginMode ?? process.env.BINGX_MARGIN_MODE);
     const symbol =
       credentials.symbol ?? process.env.BINGX_SYMBOL ?? process.env.TRADE_SYMBOL ?? "BTCUSDT";
     const normalizedSymbol = symbol.trim().toUpperCase();
@@ -182,6 +182,18 @@ export class BingxExchangeAdapter implements ExchangeAdapter {
     }
     return NaN;
   }
+}
+
+function normalizeMarginMode(value: string | undefined): "CROSS" | "ISOLATED" {
+  if (!value) return "CROSS";
+  const normalized = value.trim().toUpperCase();
+  if (["ISOLATED", "ISOLATE", "ISO", "ISOLATED_MARGIN"].includes(normalized)) {
+    return "ISOLATED";
+  }
+  if (["CROSS", "CROSSED", "CROSS_MARGIN"].includes(normalized)) {
+    return "CROSS";
+  }
+  return "CROSS";
 }
 
 function parseOptionalBoolean(value: string | undefined): boolean | undefined {

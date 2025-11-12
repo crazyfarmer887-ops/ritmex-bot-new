@@ -50,7 +50,7 @@ export interface BingxGatewayOptions {
   apiSecret: string;
   symbol: string;
   leverage: number;
-  marginMode?: string;
+  marginMode?: "CROSS" | "ISOLATED";
   testnet?: boolean;
   logger?: (context: string, error: unknown) => void;
 }
@@ -59,7 +59,7 @@ export class BingxGateway {
   private readonly exchange: any;
   private readonly symbol: string;
   private readonly leverage: number;
-  private readonly marginMode: string;
+  private readonly marginMode: "CROSS" | "ISOLATED";
   private readonly logger: (context: string, error: unknown) => void;
   private marketSymbol: string;
   private market: any | null = null;
@@ -89,7 +89,8 @@ export class BingxGateway {
     }
     this.symbol = normalizedSymbol;
     this.leverage = Number.isFinite(options.leverage) && options.leverage > 0 ? options.leverage : 50;
-    this.marginMode = (options.marginMode ?? "ISOLATED").toUpperCase();
+    const resolvedMarginMode = options.marginMode ?? "CROSS";
+    this.marginMode = resolvedMarginMode === "ISOLATED" ? "ISOLATED" : "CROSS";
     this.logger = options.logger ?? ((context, error) => console.error(`[BingxGateway] ${context}:`, error));
     this.marketSymbol = this.symbol;
 
@@ -187,8 +188,10 @@ export class BingxGateway {
     if (params.closePosition !== undefined) {
       extraParams.closePosition = params.closePosition === "true";
     }
+    const marginModeParam = this.resolveMarginModeParam();
     extraParams.positionSide = "BOTH";
-    extraParams.marginMode = this.marginMode.toLowerCase();
+    extraParams.marginMode = marginModeParam;
+    extraParams.leverage = this.leverage;
 
     let ccxtType: string;
     if (normalizedType === "STOP_MARKET") {
@@ -273,7 +276,7 @@ export class BingxGateway {
   private async configureLeverage(): Promise<void> {
     try {
       if (typeof this.exchange.setMarginMode === "function") {
-        await this.exchange.setMarginMode(this.marginMode.toLowerCase(), this.marketSymbol);
+        await this.exchange.setMarginMode(this.resolveMarginModeParam(), this.marketSymbol);
       }
     } catch (error) {
       this.logger("setMarginMode", error);
@@ -281,7 +284,7 @@ export class BingxGateway {
     try {
       if (typeof this.exchange.setLeverage === "function") {
         await this.exchange.setLeverage(this.leverage, this.marketSymbol, {
-          marginMode: this.marginMode.toLowerCase(),
+          marginMode: this.resolveMarginModeParam(),
         });
       }
     } catch (error) {
@@ -642,6 +645,10 @@ export class BingxGateway {
   }
 
   // ---- Utilities -----------------------------------------------------------
+
+  private resolveMarginModeParam(): "cross" | "isolated" {
+    return this.marginMode === "ISOLATED" ? "isolated" : "cross";
+  }
 
   private extractBalance(balance: Balances, currency: string, field: "free" | "total"): string {
     const numeric = Number((balance?.[currency] as any)?.[field]);
