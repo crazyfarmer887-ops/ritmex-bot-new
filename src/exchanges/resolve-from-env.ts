@@ -4,6 +4,7 @@ import type { AsterCredentials } from "./aster-adapter";
 import type { LighterCredentials } from "./lighter/adapter";
 import type { BackpackCredentials } from "./backpack/adapter";
 import type { ParadexCredentials } from "./paradex/adapter";
+import type { BingxCredentials } from "./bingx/adapter";
 
 interface BuildAdapterOptions {
   symbol: string;
@@ -12,7 +13,7 @@ interface BuildAdapterOptions {
 
 export function buildAdapterFromEnv(options: BuildAdapterOptions): ExchangeAdapter {
   const id = resolveExchangeId(options.exchangeId);
-  const symbol = options.symbol;
+  const symbol = id === "bingx" ? "BTCUSDT" : options.symbol;
 
   if (id === "aster") {
     const credentials = resolveAsterCredentials();
@@ -32,6 +33,11 @@ export function buildAdapterFromEnv(options: BuildAdapterOptions): ExchangeAdapt
   if (id === "paradex") {
     const credentials = resolveParadexCredentials();
     return createExchangeAdapter({ exchange: id, symbol, paradex: credentials });
+  }
+
+  if (id === "bingx") {
+    const credentials = resolveBingxCredentials(symbol);
+    return createExchangeAdapter({ exchange: id, symbol, bingx: credentials });
   }
 
   return createExchangeAdapter({ exchange: id, symbol, grvt: { symbol } });
@@ -111,6 +117,28 @@ function resolveParadexCredentials(): ParadexCredentials {
     watchReconnectDelayMs: parseOptionalNumber(process.env.PARADEX_RECONNECT_DELAY_MS),
   };
 
+  return credentials;
+}
+
+function resolveBingxCredentials(symbol: string): BingxCredentials {
+  const apiKey = process.env.BINGX_API_KEY;
+  const apiSecret = process.env.BINGX_API_SECRET;
+  if (!apiKey || !apiSecret) {
+    throw new Error("缺少 BINGX_API_KEY 或 BINGX_API_SECRET 环境变量");
+  }
+  const requestedSymbol = (process.env.BINGX_SYMBOL ?? symbol ?? "BTCUSDT").toUpperCase();
+  const leverage = parseOptionalNumber(process.env.BINGX_LEVERAGE) ?? 50;
+  if (requestedSymbol !== "BTCUSDT" && (process.env.BINGX_DEBUG === "1" || process.env.BINGX_DEBUG === "true")) {
+    console.warn(`[Bingx] 强制使用 BTCUSDT，忽略自定义符号 ${requestedSymbol}`);
+  }
+  const credentials: BingxCredentials = {
+    apiKey,
+    apiSecret,
+    password: process.env.BINGX_PASSWORD,
+    sandbox: parseOptionalBoolean(process.env.BINGX_SANDBOX),
+    leverage,
+    symbol: "BTCUSDT",
+  };
   return credentials;
 }
 

@@ -4,6 +4,7 @@ import { GrvtExchangeAdapter, type GrvtCredentials } from "./grvt/adapter";
 import { LighterExchangeAdapter, type LighterCredentials } from "./lighter/adapter";
 import { BackpackExchangeAdapter, type BackpackCredentials } from "./backpack/adapter";
 import { ParadexExchangeAdapter, type ParadexCredentials } from "./paradex/adapter";
+import { BingxExchangeAdapter, type BingxCredentials } from "./bingx/adapter";
 
 export interface ExchangeFactoryOptions {
   symbol: string;
@@ -13,9 +14,10 @@ export interface ExchangeFactoryOptions {
   lighter?: LighterCredentials;
   backpack?: BackpackCredentials;
   paradex?: ParadexCredentials;
+  bingx?: BingxCredentials;
 }
 
-export type SupportedExchangeId = "aster" | "grvt" | "lighter" | "backpack" | "paradex";
+export type SupportedExchangeId = "aster" | "grvt" | "lighter" | "backpack" | "paradex" | "bingx";
 
 export function resolveExchangeId(value?: string | null): SupportedExchangeId {
   const fallback = (value ?? process.env.EXCHANGE ?? process.env.TRADE_EXCHANGE ?? "aster")
@@ -26,6 +28,9 @@ export function resolveExchangeId(value?: string | null): SupportedExchangeId {
   if (fallback === "lighter") return "lighter";
   if (fallback === "backpack") return "backpack";
   if (fallback === "paradex") return "paradex";
+  if (fallback === "bingx" || fallback === "bingx-futures" || fallback === "bingxfutures" || fallback === "bingxswap") {
+    return "bingx";
+  }
   return "aster";
 }
 
@@ -34,11 +39,15 @@ export function getExchangeDisplayName(id: SupportedExchangeId): string {
   if (id === "lighter") return "Lighter";
   if (id === "backpack") return "Backpack";
   if (id === "paradex") return "Paradex";
+  if (id === "bingx") return "BingX";
   return "AsterDex";
 }
 
 export function createExchangeAdapter(options: ExchangeFactoryOptions): ExchangeAdapter {
   const id = resolveExchangeId(options.exchange);
+  if (id === "bingx") {
+    return new BingxExchangeAdapter({ ...options.bingx, symbol: options.symbol });
+  }
   if (id === "grvt") {
     return new GrvtExchangeAdapter({ ...options.grvt, symbol: options.symbol });
   }
