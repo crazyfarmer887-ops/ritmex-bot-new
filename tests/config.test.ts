@@ -42,5 +42,15 @@ describe("resolveSymbolFromEnv", () => {
 
     expect(resolveSymbolFromEnv("grvt")).toBe("ETHUSDT");
   });
+
+  it("prefers bingx symbol and falls back to BTC/USDT:USDT", () => {
+    process.env.EXCHANGE = "bingx";
+    process.env.BINGX_SYMBOL = "BTC/USDT:USDT";
+    expect(resolveSymbolFromEnv()).toBe("BTC/USDT:USDT");
+
+    delete process.env.BINGX_SYMBOL;
+    delete process.env.TRADE_SYMBOL;
+    expect(resolveSymbolFromEnv()).toBe("BTC/USDT:USDT");
+  });
 });
 

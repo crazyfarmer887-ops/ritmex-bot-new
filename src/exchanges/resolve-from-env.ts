@@ -4,6 +4,7 @@ import type { AsterCredentials } from "./aster-adapter";
 import type { LighterCredentials } from "./lighter/adapter";
 import type { BackpackCredentials } from "./backpack/adapter";
 import type { ParadexCredentials } from "./paradex/adapter";
+import type { BingxCredentials } from "./bingx/adapter";
 
 interface BuildAdapterOptions {
   symbol: string;
@@ -32,6 +33,10 @@ export function buildAdapterFromEnv(options: BuildAdapterOptions): ExchangeAdapt
   if (id === "paradex") {
     const credentials = resolveParadexCredentials();
     return createExchangeAdapter({ exchange: id, symbol, paradex: credentials });
+  }
+  if (id === "bingx") {
+    const credentials = resolveBingxCredentials(symbol);
+    return createExchangeAdapter({ exchange: id, symbol, bingx: credentials });
   }
 
   return createExchangeAdapter({ exchange: id, symbol, grvt: { symbol } });
@@ -134,4 +139,26 @@ function parseOptionalNumber(value: string | undefined): number | undefined {
   if (!value) return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function resolveBingxCredentials(symbol: string): BingxCredentials {
+  const apiKey = process.env.BINGX_API_KEY;
+  const apiSecret = process.env.BINGX_API_SECRET;
+  if (!apiKey || !apiSecret) {
+    throw new Error("缺少 BINGX_API_KEY 或 BINGX_API_SECRET 环境变量");
+  }
+  const leverageRaw = process.env.BINGX_LEVERAGE ?? process.env.LEVERAGE ?? "50";
+  const leverage = Number(leverageRaw);
+
+  const credentials: BingxCredentials = {
+    apiKey,
+    apiSecret,
+    password: process.env.BINGX_PASSWORD,
+    symbol: process.env.BINGX_SYMBOL ?? symbol,
+    leverage: Number.isFinite(leverage) ? leverage : 50,
+    marginMode: (process.env.BINGX_MARGIN_MODE ?? "cross").toLowerCase() === "isolated" ? "isolated" : "cross",
+    sandbox: parseOptionalBoolean(process.env.BINGX_SANDBOX),
+  };
+
+  return credentials;
 }

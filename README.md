@@ -32,6 +32,7 @@
 | Lighter | zkLighter 永续 | `LIGHTER_ACCOUNT_INDEX`, `LIGHTER_API_PRIVATE_KEY` | 默认 `LIGHTER_ENV=testnet`
 | Backpack | USDC 永续 | `BACKPACK_API_KEY`, `BACKPACK_API_SECRET`, `BACKPACK_PASSWORD` | `BACKPACK_SANDBOX=true` 启用沙盒
 | Paradex | StarkEx 永续 | `PARADEX_PRIVATE_KEY`, `PARADEX_WALLET_ADDRESS` | `PARADEX_SANDBOX=true` 使用测试网
+| BingX | USDT 永续 | `BINGX_API_KEY`, `BINGX_API_SECRET` | 固定交易 `BTC/USDT`，初始化自动设置 50× 杠杆
 
 ## 系统要求
 - Bun ≥ 1.2（需同时包含 `bun`、`bunx` 命令）
@@ -76,7 +77,7 @@ curl -fsSL https://github.com/discountry/ritmex-bot/raw/refs/heads/main/setup.sh
 
 | 变量 | 说明 |
 | --- | --- |
-| `EXCHANGE` | 选择交易所（`aster`/`grvt`/`lighter`/`backpack`/`paradex`） |
+| `EXCHANGE` | 选择交易所（`aster`/`grvt`/`lighter`/`backpack`/`paradex`/`bingx`） |
 | `TRADE_SYMBOL` | 交易对（默认 `BTCUSDT`） |
 | `TRADE_AMOUNT` | 单笔下单数量（标的资产计） |
 | `LOSS_LIMIT` | 单笔最大亏损触发的强平额度（USDT） |
@@ -118,6 +119,12 @@ curl -fsSL https://github.com/discountry/ritmex-bot/raw/refs/heads/main/setup.sh
 2. 填写 `BACKPACK_API_KEY`、`BACKPACK_API_SECRET`、`BACKPACK_PASSWORD`；如有分账户，补充 `BACKPACK_SUBACCOUNT`，默认填写主账户ID。
 3. 使用测试环境时将 `BACKPACK_SANDBOX=true`，并确认 `BACKPACK_SYMBOL` 与实际符号一致（默认 `BTC_USD_PERP`）。
 4. 可通过 `BACKPACK_DEBUG=true` 观察适配器详细日志。
+
+### BingX
+1. 设置 `EXCHANGE=bingx`。
+2. 填写 `BINGX_API_KEY` 与 `BINGX_API_SECRET`，如需启用统一交易账户密码可设置 `BINGX_PASSWORD`。
+3. 适配器强制使用 `BTC/USDT:USDT` 合约，并在初始化时自动将杠杆调整为 50 倍。
+4. 可通过 `BINGX_MARGIN_MODE` 在 `cross`（默认）与 `isolated` 之间切换，或设置 `BINGX_SANDBOX=true` 使用测试网。
 
 ### Paradex
 1. 设置 `EXCHANGE=paradex`。
@@ -173,7 +180,7 @@ bun x vitest --watch
 
 ## 常见问题
 - 至少准备 50–100 USDT 资金以覆盖策略运行需求。
-- 杠杆需在交易所提前设置（建议 ~50 倍），程序不会自动调整。
+  - 杠杆需在交易所提前设置（建议 ~50 倍），BingX 适配器会在初始化时强制设为 50 倍。
 - 请确保服务器/电脑时间同步真实世界时间，避免签名过期。
 - 账户需保持单向持仓模式。
 - `.env` 未读取：确认文件位于项目根目录且变量名无误。

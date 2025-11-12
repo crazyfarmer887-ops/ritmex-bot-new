@@ -29,6 +29,7 @@ A Bun-powered multi-exchange perpetuals workstation that ships an SMA30 trend en
 | Lighter | zkLighter perpetuals | `LIGHTER_ACCOUNT_INDEX`, `LIGHTER_API_PRIVATE_KEY` | Defaults to `LIGHTER_ENV=testnet` |
 | Backpack | USDC perpetuals | `BACKPACK_API_KEY`, `BACKPACK_API_SECRET`, `BACKPACK_PASSWORD` | Set `BACKPACK_SANDBOX=true` for the sandbox |
 | Paradex | StarkEx perpetuals | `PARADEX_PRIVATE_KEY`, `PARADEX_WALLET_ADDRESS` | Toggle `PARADEX_SANDBOX=true` for the testnet |
+| BingX | USDT perpetuals | `BINGX_API_KEY`, `BINGX_API_SECRET` | Adapter locks to BTC/USDT and auto-applies 50× leverage |
 
 ## Requirements
 - Bun ≥ 1.2 (both `bun` and `bunx` on PATH)
@@ -73,7 +74,7 @@ The script installs Bun, project dependencies, collects Aster API credentials, g
 
 | Variable | Purpose |
 | --- | --- |
-| `EXCHANGE` | Choose the venue (`aster` / `grvt` / `lighter` / `backpack` / `paradex`) |
+| `EXCHANGE` | Choose the venue (`aster` / `grvt` / `lighter` / `backpack` / `paradex` / `bingx`) |
 | `TRADE_SYMBOL` | Contract symbol (defaults to `BTCUSDT`) |
 | `TRADE_AMOUNT` | Order size in base asset units |
 | `LOSS_LIMIT` | Max per-trade loss in USDT before forced close |
@@ -115,6 +116,12 @@ The script installs Bun, project dependencies, collects Aster API credentials, g
 2. Populate `BACKPACK_API_KEY`, `BACKPACK_API_SECRET`, and `BACKPACK_PASSWORD`; add `BACKPACK_SUBACCOUNT` if you trade from a subaccount.
 3. Toggle `BACKPACK_SANDBOX=true` for the sandbox environment and verify `BACKPACK_SYMBOL` matches the contract (defaults to `BTC_USD_PERP`).
 4. Enable `BACKPACK_DEBUG=true` for verbose adapter logging.
+
+### BingX
+1. Set `EXCHANGE=bingx`.
+2. Supply `BINGX_API_KEY` and `BINGX_API_SECRET`; `BINGX_PASSWORD` is optional for unified trading API keys.
+3. The adapter enforces trading on `BTC/USDT:USDT` and automatically sets 50× leverage in one-way mode.
+4. Adjust `BINGX_MARGIN_MODE` between `cross` (default) and `isolated`, or enable `BINGX_SANDBOX=true` for the testnet endpoints.
 
 ### Paradex
 1. Set `EXCHANGE=paradex`.
@@ -170,7 +177,7 @@ bun x vitest --watch
 
 ## Troubleshooting
 - Keep at least 50–100 USDT in the account before deploying a live strategy.
-- Configure leverage on the exchange manually (~50x is recommended); the bot will not change it.
+  - Configure leverage on the exchange manually (~50x is recommended); the BingX adapter enforces 50× during init.
 - Ensure your server or workstation clock is in sync to avoid signature errors.
 - Accounts must run in one-way position mode.
 - **Env not loading**: make sure `.env` lives in the repo root and variable names are spelled correctly.
