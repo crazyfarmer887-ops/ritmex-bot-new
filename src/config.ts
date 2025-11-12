@@ -138,6 +138,19 @@ export interface GridConfig {
   maxCloseSlippagePct: number;
 }
 
+export interface HedgeConfig {
+  grvtSymbol: string;
+  bingxSymbol: string;
+  orderAmount: number;
+  exitRoiPercent: number;
+  pollIntervalMs: number;
+  maxLogEntries: number;
+  grvtPriceTick: number;
+  grvtQtyStep: number;
+  bingxPriceTick: number;
+  bingxQtyStep: number;
+}
+
 const resolveBasisSymbol = (envKeys: string[], fallback: string): string => {
   for (const key of envKeys) {
     const value = process.env[key];
@@ -205,6 +218,38 @@ export const gridConfig: GridConfig = {
 };
 
 gridConfig.maxPositionSize = resolveGridMaxPosition(gridConfig.orderSize, gridConfig.gridLevels);
+
+export const hedgeConfig: HedgeConfig = {
+  grvtSymbol:
+    (process.env.HEDGE_GRVT_SYMBOL && process.env.HEDGE_GRVT_SYMBOL.trim()) ||
+    resolveSymbolFromEnv("grvt"),
+  bingxSymbol:
+    (process.env.HEDGE_BINGX_SYMBOL && process.env.HEDGE_BINGX_SYMBOL.trim()) ||
+    resolveSymbolFromEnv("bingx"),
+  orderAmount: Math.max(
+    0,
+    parseNumber(process.env.HEDGE_ORDER_AMOUNT ?? process.env.TRADE_AMOUNT, 0.001)
+  ),
+  exitRoiPercent: Math.max(0, parseNumber(process.env.HEDGE_EXIT_ROI_PERCENT, 5)),
+  pollIntervalMs: Math.max(200, parseNumber(process.env.HEDGE_POLL_INTERVAL_MS, 1000)),
+  maxLogEntries: Math.max(50, parseNumber(process.env.HEDGE_MAX_LOG_ENTRIES, 200)),
+  grvtPriceTick: Math.max(
+    1e-9,
+    parseNumber(process.env.HEDGE_GRVT_PRICE_TICK ?? process.env.PRICE_TICK, 0.1)
+  ),
+  grvtQtyStep: Math.max(
+    1e-9,
+    parseNumber(process.env.HEDGE_GRVT_QTY_STEP ?? process.env.QTY_STEP, 0.001)
+  ),
+  bingxPriceTick: Math.max(
+    1e-9,
+    parseNumber(process.env.HEDGE_BINGX_PRICE_TICK ?? process.env.PRICE_TICK, 0.1)
+  ),
+  bingxQtyStep: Math.max(
+    1e-9,
+    parseNumber(process.env.HEDGE_BINGX_QTY_STEP ?? process.env.QTY_STEP, 0.001)
+  ),
+};
 
 export function isBasisStrategyEnabled(): boolean {
   const raw = process.env.ENABLE_BASIS_STRATEGY;

@@ -1,4 +1,11 @@
-export type StrategyId = "trend" | "guardian" | "maker" | "offset-maker" | "basis" | "grid";
+export type StrategyId =
+  | "trend"
+  | "guardian"
+  | "maker"
+  | "offset-maker"
+  | "basis"
+  | "grid"
+  | "grvt-bingx-hedge";
 
 export interface CliOptions {
   strategy?: StrategyId;
@@ -14,6 +21,7 @@ const STRATEGY_VALUES = new Set<StrategyId>([
   "offset-maker",
   "basis",
   "grid",
+  "grvt-bingx-hedge",
 ]);
 
 export function parseCliArgs(argv: string[] = process.argv.slice(2)): CliOptions {
@@ -84,7 +92,7 @@ function assignExchange(options: CliOptions, raw: string): void {
 
 export function printCliHelp(): void {
   // eslint-disable-next-line no-console
-  console.log(`Usage: bun run index.ts [--strategy <trend|guardian|maker|offset-maker|basis|grid>] [--exchange <aster|grvt|lighter|backpack>] [--silent]\n\n` +
+  console.log(`Usage: bun run index.ts [--strategy <trend|guardian|maker|offset-maker|basis|grid|grvt-bingx-hedge>] [--exchange <aster|grvt|lighter|backpack>] [--silent]\n\n` +
     `Options:\n` +
     `  --strategy, -s    Automatically start the specified strategy without the interactive menu.\n` +
     `                    Aliases: offset, offset-maker for the offset maker engine.\n` +
