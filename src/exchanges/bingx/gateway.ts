@@ -45,12 +45,14 @@ const DEPTH_POLL_INTERVAL_MS = 1_000;
 const TICKER_POLL_INTERVAL_MS = 2_000;
 const KLINE_POLL_INTERVAL_MS = 5_000;
 
+export type BingxMarginMode = "ISOLATED" | "CROSS";
+
 export interface BingxGatewayOptions {
   apiKey: string;
   apiSecret: string;
   symbol: string;
   leverage: number;
-  marginMode?: string;
+  marginMode?: BingxMarginMode;
   testnet?: boolean;
   logger?: (context: string, error: unknown) => void;
 }
@@ -59,7 +61,8 @@ export class BingxGateway {
   private readonly exchange: any;
   private readonly symbol: string;
   private readonly leverage: number;
-  private readonly marginMode: string;
+  private readonly marginMode?: BingxMarginMode;
+  private readonly marginModeParam?: "isolated" | "cross";
   private readonly logger: (context: string, error: unknown) => void;
   private marketSymbol: string;
   private market: any | null = null;
@@ -89,7 +92,10 @@ export class BingxGateway {
     }
     this.symbol = normalizedSymbol;
     this.leverage = Number.isFinite(options.leverage) && options.leverage > 0 ? options.leverage : 50;
-    this.marginMode = (options.marginMode ?? "ISOLATED").toUpperCase();
+    this.marginMode = options.marginMode;
+    this.marginModeParam = options.marginMode
+      ? (options.marginMode.toLowerCase() as "isolated" | "cross")
+      : undefined;
     this.logger = options.logger ?? ((context, error) => console.error(`[BingxGateway] ${context}:`, error));
     this.marketSymbol = this.symbol;
 
@@ -188,7 +194,9 @@ export class BingxGateway {
       extraParams.closePosition = params.closePosition === "true";
     }
     extraParams.positionSide = "BOTH";
-    extraParams.marginMode = this.marginMode.toLowerCase();
+    if (this.marginModeParam) {
+      extraParams.marginMode = this.marginModeParam;
+    }
 
     let ccxtType: string;
     if (normalizedType === "STOP_MARKET") {
@@ -272,17 +280,21 @@ export class BingxGateway {
 
   private async configureLeverage(): Promise<void> {
     try {
-      if (typeof this.exchange.setMarginMode === "function") {
-        await this.exchange.setMarginMode(this.marginMode.toLowerCase(), this.marketSymbol);
+      if (this.marginModeParam && typeof this.exchange.setMarginMode === "function") {
+        await this.exchange.setMarginMode(this.marginModeParam, this.marketSymbol);
       }
     } catch (error) {
       this.logger("setMarginMode", error);
     }
     try {
       if (typeof this.exchange.setLeverage === "function") {
-        await this.exchange.setLeverage(this.leverage, this.marketSymbol, {
-          marginMode: this.marginMode.toLowerCase(),
-        });
+        if (this.marginModeParam) {
+          await this.exchange.setLeverage(this.leverage, this.marketSymbol, {
+            marginMode: this.marginModeParam,
+          });
+        } else {
+          await this.exchange.setLeverage(this.leverage, this.marketSymbol);
+        }
       }
     } catch (error) {
       this.logger("setLeverage", error);
@@ -489,6 +501,9 @@ export class BingxGateway {
     if (isShort) positionSide = "SHORT";
     else if (isLong) positionSide = "LONG";
 
+    const marginTypeRaw = this.toOptionalUpperString(info.marginMode ?? info.marginType);
+    const marginType = marginTypeRaw ?? this.marginMode;
+
     return {
       symbol: this.symbol,
       positionAmt: signedAmount.toString(),
@@ -499,7 +514,7 @@ export class BingxGateway {
       markPrice,
       liquidationPrice,
       leverage,
-      marginType: this.marginMode,
+      marginType,
     };
   }
 
@@ -674,6 +689,13 @@ export class BingxGateway {
   private toNumber(value: unknown): number {
     const parsed = Number(this.toStringAmount(value));
     return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  private toOptionalUpperString(value: unknown): string | undefined {
+    if (typeof value !== "string") return undefined;
+    const normalized = value.trim();
+    if (!normalized) return undefined;
+    return normalized.toUpperCase();
   }
 
   private sumStrings(values: string[]): string {

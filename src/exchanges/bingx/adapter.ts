@@ -8,7 +8,7 @@ import type {
 } from "../adapter";
 import type { AsterOrder, CreateOrderParams, ExchangePrecision } from "../types";
 import { extractMessage } from "../../utils/errors";
-import { BingxGateway, type BingxGatewayOptions } from "./gateway";
+import { BingxGateway, type BingxGatewayOptions, type BingxMarginMode } from "./gateway";
 
 export interface BingxCredentials {
   apiKey?: string;
@@ -35,7 +35,7 @@ export class BingxExchangeAdapter implements ExchangeAdapter {
       credentials.leverage ??
       parseOptionalNumber(process.env.BINGX_LEVERAGE) ??
       50;
-    const marginMode = credentials.marginMode ?? process.env.BINGX_MARGIN_MODE ?? "ISOLATED";
+    const marginMode = normalizeMarginMode(credentials.marginMode ?? process.env.BINGX_MARGIN_MODE);
     const symbol =
       credentials.symbol ?? process.env.BINGX_SYMBOL ?? process.env.TRADE_SYMBOL ?? "BTCUSDT";
     const normalizedSymbol = symbol.trim().toUpperCase();
@@ -197,5 +197,19 @@ function parseOptionalNumber(value: string | undefined): number | undefined {
   if (value == null) return undefined;
   const parsed = Number(value);
   if (Number.isFinite(parsed)) return parsed;
+  return undefined;
+}
+
+function normalizeMarginMode(raw: string | undefined | null): BingxMarginMode | undefined {
+  if (!raw) return undefined;
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized) return undefined;
+  const compact = normalized.replace(/[\s_\-]/g, "");
+  if (["isolated", "iso", "isolatedmargin", "isolatemode"].includes(compact)) {
+    return "ISOLATED";
+  }
+  if (["cross", "crossed", "crossmargin", "crossmode"].includes(compact)) {
+    return "CROSS";
+  }
   return undefined;
 }
