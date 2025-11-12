@@ -1,4 +1,4 @@
-import { basisConfig, gridConfig, isBasisStrategyEnabled, makerConfig, tradingConfig } from "../config";
+import { basisConfig, gridConfig, grvtBingxHedgeConfig, isBasisStrategyEnabled, makerConfig, tradingConfig } from "../config";
 import { getExchangeDisplayName, resolveExchangeId } from "../exchanges/create-adapter";
 import type { ExchangeAdapter } from "../exchanges/adapter";
 import { buildAdapterFromEnv } from "../exchanges/resolve-from-env";
@@ -8,6 +8,7 @@ import { TrendEngine, type TrendEngineSnapshot } from "../strategy/trend-engine"
 import { GuardianEngine, type GuardianEngineSnapshot } from "../strategy/guardian-engine";
 import { BasisArbEngine, type BasisArbSnapshot } from "../strategy/basis-arb-engine";
 import { GridEngine, type GridEngineSnapshot } from "../strategy/grid-engine";
+import { GrvtBingxHedgeEngine, type GrvtBingxHedgeSnapshot } from "../strategy/grvt-bingx-hedge-engine";
 import { extractMessage } from "../utils/errors";
 import type { StrategyId } from "./args";
 
@@ -24,6 +25,7 @@ export const STRATEGY_LABELS: Record<StrategyId, string> = {
   "offset-maker": "Offset Maker",
   basis: "Basis Arbitrage",
   grid: "Grid",
+  "grvt-bingx-hedge": "GRVT-BingX Hedge",
 };
 
 export async function startStrategy(strategyId: StrategyId, options: RunnerOptions = {}): Promise<void> {
@@ -119,6 +121,18 @@ const STRATEGY_FACTORIES: Record<StrategyId, StrategyRunner> = {
       offUpdate: (emitter) => engine.off("update", emitter),
     });
   },
+  "grvt-bingx-hedge": async (opts) => {
+    const engine = new GrvtBingxHedgeEngine(grvtBingxHedgeConfig);
+    await runEngine({
+      engine,
+      strategy: "grvt-bingx-hedge",
+      silent: opts.silent,
+      getSnapshot: () => engine.getSnapshot(),
+      onUpdate: (emitter) => engine.on("update", emitter),
+      offUpdate: (emitter) => engine.off("update", emitter),
+      exchangeName: "GRVT + BingX",
+    });
+  },
 };
 
 interface EngineHarness<TSnapshot> {
@@ -128,22 +142,23 @@ interface EngineHarness<TSnapshot> {
   getSnapshot: () => TSnapshot;
   onUpdate: (handler: (snapshot: TSnapshot) => void) => void;
   offUpdate: (handler: (snapshot: TSnapshot) => void) => void;
+  exchangeName?: string;
 }
 
 async function runEngine<
-  TSnapshot extends
-    | TrendEngineSnapshot
-    | GuardianEngineSnapshot
-    | MakerEngineSnapshot
-    | OffsetMakerEngineSnapshot
-    | BasisArbSnapshot
-    | GridEngineSnapshot
+    TSnapshot extends
+      | TrendEngineSnapshot
+      | GuardianEngineSnapshot
+      | MakerEngineSnapshot
+      | OffsetMakerEngineSnapshot
+      | BasisArbSnapshot
+      | GridEngineSnapshot
+      | GrvtBingxHedgeSnapshot
 >(
   harness: EngineHarness<TSnapshot>
 ): Promise<void> {
-  const { engine, strategy, silent, getSnapshot, onUpdate, offUpdate } = harness;
-  const exchangeId = resolveExchangeId();
-  const exchangeName = getExchangeDisplayName(exchangeId);
+  const { engine, strategy, silent, getSnapshot, onUpdate, offUpdate, exchangeName: overrideName } = harness;
+  const exchangeName = overrideName ?? getExchangeDisplayName(resolveExchangeId());
   const label = STRATEGY_LABELS[strategy];
 
   const initial = getSnapshot();

@@ -1,10 +1,17 @@
-export type StrategyId = "trend" | "guardian" | "maker" | "offset-maker" | "basis" | "grid";
+export type StrategyId =
+  | "trend"
+  | "guardian"
+  | "maker"
+  | "offset-maker"
+  | "basis"
+  | "grid"
+  | "grvt-bingx-hedge";
 
 export interface CliOptions {
   strategy?: StrategyId;
   silent: boolean;
   help: boolean;
-  exchange?: "aster" | "grvt" | "lighter" | "backpack";
+  exchange?: "aster" | "grvt" | "lighter" | "backpack" | "bingx";
 }
 
 const STRATEGY_VALUES = new Set<StrategyId>([
@@ -14,6 +21,7 @@ const STRATEGY_VALUES = new Set<StrategyId>([
   "offset-maker",
   "basis",
   "grid",
+  "grvt-bingx-hedge",
 ]);
 
 export function parseCliArgs(argv: string[] = process.argv.slice(2)): CliOptions {
@@ -69,13 +77,27 @@ function assignStrategy(options: CliOptions, raw: string): void {
     options.strategy = normalized as StrategyId;
   } else if (normalized === "offset" || normalized === "offsetmaker" || normalized === "offset-maker") {
     options.strategy = "offset-maker";
+  } else if (
+    normalized === "hedge" ||
+    normalized === "grvtbingx" ||
+    normalized === "grvt-bingx" ||
+    normalized === "grvt-hedge" ||
+    normalized === "hedging"
+  ) {
+    options.strategy = "grvt-bingx-hedge";
   }
 }
 
 function assignExchange(options: CliOptions, raw: string): void {
   const normalized = raw.trim().toLowerCase();
   if (!normalized) return;
-  if (normalized === "aster" || normalized === "grvt" || normalized === "lighter" || normalized === "backpack") {
+  if (
+    normalized === "aster" ||
+    normalized === "grvt" ||
+    normalized === "lighter" ||
+    normalized === "backpack" ||
+    normalized === "bingx"
+  ) {
     options.exchange = normalized as CliOptions["exchange"];
   } else if (normalized === "gravity" || normalized === "grav" || normalized === "grv") {
     options.exchange = "grvt";
@@ -84,10 +106,11 @@ function assignExchange(options: CliOptions, raw: string): void {
 
 export function printCliHelp(): void {
   // eslint-disable-next-line no-console
-  console.log(`Usage: bun run index.ts [--strategy <trend|guardian|maker|offset-maker|basis|grid>] [--exchange <aster|grvt|lighter|backpack>] [--silent]\n\n` +
+  console.log(`Usage: bun run index.ts [--strategy <trend|guardian|maker|offset-maker|basis|grid|grvt-bingx-hedge>] [--exchange <aster|grvt|lighter|backpack|bingx>] [--silent]\n\n` +
     `Options:\n` +
     `  --strategy, -s    Automatically start the specified strategy without the interactive menu.\n` +
     `                    Aliases: offset, offset-maker for the offset maker engine.\n` +
+    `                    Aliases: hedge, grvt-bingx for the GRVT-BingX hedge mode.\n` +
     `  --exchange, -e    Choose exchange. Overrides EXCHANGE/TRADE_EXCHANGE environment variables.\n` +
     `  --silent, -q      Reduce console output. When used with --strategy, runs in silent daemon mode.\n` +
     `  --help, -h        Show this help message.\n`);

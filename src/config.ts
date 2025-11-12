@@ -212,3 +212,61 @@ export function isBasisStrategyEnabled(): boolean {
   const normalized = raw.trim().toLowerCase();
   return normalized === "1" || normalized === "true" || normalized === "yes";
 }
+
+export interface GrvtBingxHedgeConfig {
+  grvtSymbol: string;
+  bingxSymbol: string;
+  orderSize: number;
+  targetRoiPct: number;
+  refreshIntervalMs: number;
+  maxLogEntries: number;
+  maxCloseSlippagePct: number;
+  positionTolerance: number;
+  autoEnter: boolean;
+}
+
+const resolveHedgeSymbol = (envKeys: string[], fallback: string): string => {
+  for (const key of envKeys) {
+    const value = process.env[key];
+    if (value && value.trim()) {
+      return value.trim().toUpperCase();
+    }
+  }
+  return fallback.toUpperCase();
+};
+
+export const grvtBingxHedgeConfig: GrvtBingxHedgeConfig = {
+  grvtSymbol: resolveHedgeSymbol(
+    ["HEDGE_GRVT_SYMBOL", "GRVT_HEDGE_SYMBOL", "GRVT_SYMBOL", "TRADE_SYMBOL"],
+    resolveSymbolFromEnv("grvt")
+  ),
+  bingxSymbol: resolveHedgeSymbol(
+    ["HEDGE_BINGX_SYMBOL", "BINGX_HEDGE_SYMBOL", "BINGX_SYMBOL", "TRADE_SYMBOL"],
+    resolveSymbolFromEnv("bingx")
+  ),
+  orderSize: Math.max(
+    0,
+    parseNumber(
+      process.env.HEDGE_ORDER_SIZE ?? process.env.HEDGE_TRADE_AMOUNT ?? process.env.TRADE_AMOUNT,
+      0.001
+    )
+  ),
+  targetRoiPct: Math.max(
+    0,
+    parseNumber(process.env.HEDGE_TARGET_ROI_PCT ?? process.env.HEDGE_ROI_PCT, 5)
+  ),
+  refreshIntervalMs: Math.max(250, parseNumber(process.env.HEDGE_REFRESH_INTERVAL_MS, 1_000)),
+  maxLogEntries: Math.max(50, parseNumber(process.env.HEDGE_MAX_LOG_ENTRIES, 200)),
+  maxCloseSlippagePct: Math.max(
+    0,
+    parseNumber(
+      process.env.HEDGE_MAX_CLOSE_SLIPPAGE_PCT ?? process.env.MAX_CLOSE_SLIPPAGE_PCT,
+      0.03
+    )
+  ),
+  positionTolerance: Math.max(
+    0,
+    parseNumber(process.env.HEDGE_POSITION_TOLERANCE ?? process.env.HEDGE_SIZE_TOLERANCE, 1e-4)
+  ),
+  autoEnter: parseBoolean(process.env.HEDGE_AUTO_ENTER, true),
+};

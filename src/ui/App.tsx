@@ -6,12 +6,13 @@ import { MakerApp } from "./MakerApp";
 import { OffsetMakerApp } from "./OffsetMakerApp";
 import { GridApp } from "./GridApp";
 import { BasisApp } from "./BasisApp";
+import { GrvtBingxHedgeApp } from "./GrvtBingxHedgeApp";
 import { isBasisStrategyEnabled } from "../config";
 import { loadCopyrightFragments, verifyCopyrightIntegrity } from "../utils/copyright";
 import { resolveExchangeId } from "../exchanges/create-adapter";
 
 interface StrategyOption {
-  id: "trend" | "guardian" | "maker" | "offset-maker" | "basis" | "grid";
+  id: "trend" | "guardian" | "maker" | "offset-maker" | "basis" | "grid" | "grvt-bingx-hedge";
   label: string;
   description: string;
   component: React.ComponentType<{ onExit: () => void }>;
@@ -59,18 +60,24 @@ export function App() {
   const integrityOk = useMemo(() => verifyCopyrightIntegrity(), []);
   const exchangeId = useMemo(() => resolveExchangeId(), []);
   const strategies = useMemo(() => {
-    if (!isBasisStrategyEnabled()) {
-      return BASE_STRATEGIES;
-    }
-    return [
-      ...BASE_STRATEGIES,
-      {
-        id: "basis" as const,
-        label: "期现套利策略",
-        description: "监控期货与现货盘口差价，辅助发现套利机会",
-        component: BasisApp,
-      },
-    ];
+    const base = !isBasisStrategyEnabled()
+      ? [...BASE_STRATEGIES]
+      : [
+          ...BASE_STRATEGIES,
+          {
+            id: "basis" as const,
+            label: "期现套利策略",
+            description: "监控期货与现货盘口差价，辅助发现套利机会",
+            component: BasisApp,
+          },
+        ];
+    base.push({
+      id: "grvt-bingx-hedge" as const,
+      label: "GRVT-BingX 헷지 모드",
+      description: "GRVT 롱과 BingX 숏을 동시에 운영하고 ROI 임계값으로 자동 종료 주문을 관리합니다",
+      component: GrvtBingxHedgeApp,
+    });
+    return base;
   }, []);
 
   useInput(
