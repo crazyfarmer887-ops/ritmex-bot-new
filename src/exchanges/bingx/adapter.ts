@@ -16,6 +16,7 @@ export interface BingxCredentials {
   symbol?: string;
   leverage?: number;
   marginMode?: string;
+  positionMode?: string;
   testnet?: boolean;
 }
 
@@ -36,6 +37,11 @@ export class BingxExchangeAdapter implements ExchangeAdapter {
       parseOptionalNumber(process.env.BINGX_LEVERAGE) ??
       50;
     const marginMode = credentials.marginMode ?? process.env.BINGX_MARGIN_MODE ?? "ISOLATED";
+    const hedgedFlag = parseOptionalBoolean(process.env.BINGX_HEDGED);
+    const positionMode =
+      normalizePositionMode(credentials.positionMode) ??
+      normalizePositionMode(process.env.BINGX_POSITION_MODE) ??
+      (hedgedFlag === undefined ? undefined : hedgedFlag ? "HEDGE" : "ONEWAY");
     const symbol =
       credentials.symbol ?? process.env.BINGX_SYMBOL ?? process.env.TRADE_SYMBOL ?? "BTCUSDT";
     const normalizedSymbol = symbol.trim().toUpperCase();
@@ -51,6 +57,7 @@ export class BingxExchangeAdapter implements ExchangeAdapter {
       symbol: normalizedSymbol,
       leverage: leverage > 0 ? leverage : 50,
       marginMode,
+      positionMode,
       testnet: credentials.testnet ?? parseOptionalBoolean(process.env.BINGX_TESTNET),
       logger: (context, error) => this.logError(context, error),
     };
@@ -197,5 +204,26 @@ function parseOptionalNumber(value: string | undefined): number | undefined {
   if (value == null) return undefined;
   const parsed = Number(value);
   if (Number.isFinite(parsed)) return parsed;
+  return undefined;
+}
+
+function normalizePositionMode(value: string | undefined): "HEDGE" | "ONEWAY" | undefined {
+  if (value == null) return undefined;
+  const normalized = value.trim().toUpperCase();
+  if (!normalized) return undefined;
+  if (
+    ["HEDGE", "HEDGED", "DUAL", "DUAL_SIDE", "DUAL-SIDE", "DUALMODE", "DUAL_MODE"].includes(
+      normalized
+    )
+  ) {
+    return "HEDGE";
+  }
+  if (
+    ["ONEWAY", "ONE-WAY", "SINGLE", "SINGLE_SIDE", "SINGLE-SIDE", "BOTH", "ONE"].includes(
+      normalized
+    )
+  ) {
+    return "ONEWAY";
+  }
   return undefined;
 }
