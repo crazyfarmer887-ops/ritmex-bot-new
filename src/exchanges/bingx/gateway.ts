@@ -51,6 +51,7 @@ export interface BingxGatewayOptions {
   symbol: string;
   leverage: number;
   marginMode?: string;
+  positionMode?: "ONE_WAY" | "HEDGE";
   testnet?: boolean;
   logger?: (context: string, error: unknown) => void;
 }
@@ -60,6 +61,7 @@ export class BingxGateway {
   private readonly symbol: string;
   private readonly leverage: number;
   private readonly marginMode: string;
+  private readonly positionMode: "ONE_WAY" | "HEDGE";
   private readonly logger: (context: string, error: unknown) => void;
   private marketSymbol: string;
   private market: any | null = null;
@@ -90,6 +92,7 @@ export class BingxGateway {
     this.symbol = normalizedSymbol;
     this.leverage = Number.isFinite(options.leverage) && options.leverage > 0 ? options.leverage : 50;
     this.marginMode = (options.marginMode ?? "ISOLATED").toUpperCase();
+    this.positionMode = options.positionMode === "HEDGE" ? "HEDGE" : "ONE_WAY";
     this.logger = options.logger ?? ((context, error) => console.error(`[BingxGateway] ${context}:`, error));
     this.marketSymbol = this.symbol;
 
@@ -187,7 +190,10 @@ export class BingxGateway {
     if (params.closePosition !== undefined) {
       extraParams.closePosition = params.closePosition === "true";
     }
-    extraParams.positionSide = "BOTH";
+    const positionSide = this.resolvePositionSide(params);
+    if (positionSide) {
+      extraParams.positionSide = positionSide;
+    }
     extraParams.marginMode = this.marginMode.toLowerCase();
 
     let ccxtType: string;
@@ -266,6 +272,7 @@ export class BingxGateway {
     this.market = market;
     this.marketSymbol = market.symbol;
 
+    await this.configurePositionMode();
     await this.configureLeverage();
     this.initialized = true;
   }
@@ -286,6 +293,21 @@ export class BingxGateway {
       }
     } catch (error) {
       this.logger("setLeverage", error);
+    }
+  }
+
+  private async configurePositionMode(): Promise<void> {
+    try {
+      const hedged = this.positionMode === "HEDGE";
+      if (typeof this.exchange.setPositionMode === "function") {
+        await this.exchange.setPositionMode(hedged, this.marketSymbol);
+        return;
+      }
+      if (typeof this.exchange.setHedgedMode === "function") {
+        await this.exchange.setHedgedMode(hedged, this.marketSymbol);
+      }
+    } catch (error) {
+      this.logger("setPositionMode", error);
     }
   }
 
@@ -580,6 +602,7 @@ export class BingxGateway {
     const cumQuote = this.pickString([order.cost, info.executedQuoteQuantity]);
     const timestamp = order.timestamp ?? Date.now();
     const reduceOnly = Boolean(order.reduceOnly ?? info.reduceOnly ?? false);
+    const positionSide = this.extractOrderPositionSide(order, info);
 
     return {
       orderId: String(order.id ?? ""),
@@ -598,7 +621,7 @@ export class BingxGateway {
       closePosition: Boolean(info.closePosition ?? false),
       avgPrice,
       cumQuote,
-      positionSide: "BOTH",
+      positionSide,
     };
   }
 
@@ -759,5 +782,44 @@ export class BingxGateway {
       default:
         return 60_000;
     }
+  }
+
+  private resolvePositionSide(params: CreateOrderParams): PositionSide | undefined {
+    const explicit = this.normalizePositionSide(params.positionSide);
+    if (explicit) return explicit;
+    if (this.positionMode !== "HEDGE") {
+      return "BOTH";
+    }
+    const reduceOnly = params.reduceOnly === "true";
+    const closePosition = params.closePosition === "true";
+    const closing = reduceOnly || closePosition;
+    if (closing) {
+      return params.side === "BUY" ? "SHORT" : "LONG";
+    }
+    return params.side === "BUY" ? "LONG" : "SHORT";
+  }
+
+  private extractOrderPositionSide(order: CcxtOrder, info: Record<string, unknown>): PositionSide {
+    const raw =
+      info.positionSide ??
+      (info as any).position_side ??
+      (info as any).ps ??
+      (info as any).position_mode ??
+      (order as any).positionSide;
+    const normalized = this.normalizePositionSide(raw);
+    if (normalized) return normalized;
+    if (this.positionMode === "HEDGE") {
+      return (order.side ?? "").toUpperCase() === "BUY" ? "LONG" : "SHORT";
+    }
+    return "BOTH";
+  }
+
+  private normalizePositionSide(value: unknown): PositionSide | undefined {
+    if (typeof value !== "string") return undefined;
+    const normalized = value.trim().toUpperCase();
+    if (normalized === "LONG" || normalized === "SHORT" || normalized === "BOTH") {
+      return normalized as PositionSide;
+    }
+    return undefined;
   }
 }
