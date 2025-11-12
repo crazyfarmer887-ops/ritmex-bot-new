@@ -4,6 +4,7 @@ import { TrendApp } from "./TrendApp";
 import { GuardianApp } from "./GuardianApp";
 import { MakerApp } from "./MakerApp";
 import { OffsetMakerApp } from "./OffsetMakerApp";
+import { HedgeApp } from "./HedgeApp";
 import { GridApp } from "./GridApp";
 import { BasisApp } from "./BasisApp";
 import { isBasisStrategyEnabled } from "../config";
@@ -11,7 +12,7 @@ import { loadCopyrightFragments, verifyCopyrightIntegrity } from "../utils/copyr
 import { resolveExchangeId } from "../exchanges/create-adapter";
 
 interface StrategyOption {
-  id: "trend" | "guardian" | "maker" | "offset-maker" | "basis" | "grid";
+  id: "trend" | "guardian" | "maker" | "offset-maker" | "basis" | "grid" | "hedge";
   label: string;
   description: string;
   component: React.ComponentType<{ onExit: () => void }>;
@@ -59,8 +60,14 @@ export function App() {
   const integrityOk = useMemo(() => verifyCopyrightIntegrity(), []);
   const exchangeId = useMemo(() => resolveExchangeId(), []);
   const strategies = useMemo(() => {
+    const hedgingOption: StrategyOption = {
+      id: "hedge",
+      label: "GRVT ⇄ BingX 对冲模式",
+      description: "双交易所同开仓位，按 ROI 阈值预挂止盈单并自动对冲退出",
+      component: HedgeApp,
+    };
     if (!isBasisStrategyEnabled()) {
-      return BASE_STRATEGIES;
+      return [...BASE_STRATEGIES, hedgingOption];
     }
     return [
       ...BASE_STRATEGIES,
@@ -70,6 +77,7 @@ export function App() {
         description: "监控期货与现货盘口差价，辅助发现套利机会",
         component: BasisApp,
       },
+      hedgingOption,
     ];
   }, []);
 

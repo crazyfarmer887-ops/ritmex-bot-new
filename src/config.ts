@@ -206,6 +206,53 @@ export const gridConfig: GridConfig = {
 
 gridConfig.maxPositionSize = resolveGridMaxPosition(gridConfig.orderSize, gridConfig.gridLevels);
 
+export interface GrvtBingxHedgeConfig {
+  grvtInstrument: string;
+  grvtSymbol: string;
+  bingxSymbol: string;
+  tradeAmount: number;
+  targetRoiPct: number;
+  refreshIntervalMs: number;
+  maxLogEntries: number;
+  entryAggressivenessBps: number;
+  maxCloseSlippagePct: number;
+}
+
+function resolveGrvtSymbol(instrument: string): string {
+  const fromEnv =
+    process.env.GRVT_SYMBOL ??
+    process.env.TRADE_SYMBOL ??
+    instrument?.replace(/[_-]/g, "") ??
+    "BTCUSDT";
+  return fromEnv.trim().toUpperCase();
+}
+
+function resolveBingxSymbol(): string {
+  const value =
+    process.env.BINGX_SYMBOL ??
+    process.env.TRADE_SYMBOL ??
+    "BTCUSDT";
+  return value.trim().toUpperCase();
+}
+
+export const grvtBingxHedgeConfig: GrvtBingxHedgeConfig = {
+  grvtInstrument: (process.env.GRVT_INSTRUMENT ?? "").trim(),
+  grvtSymbol: resolveGrvtSymbol(process.env.GRVT_INSTRUMENT ?? ""),
+  bingxSymbol: resolveBingxSymbol(),
+  tradeAmount: Math.max(0, parseNumber(process.env.HEDGE_TRADE_AMOUNT ?? process.env.TRADE_AMOUNT, 0.001)),
+  targetRoiPct: Math.max(0, parseNumber(process.env.HEDGE_TARGET_ROI_PCT, 5)),
+  refreshIntervalMs: Math.max(200, parseNumber(process.env.HEDGE_REFRESH_INTERVAL_MS, 1000)),
+  maxLogEntries: Math.max(10, parseNumber(process.env.HEDGE_MAX_LOG_ENTRIES, 200)),
+  entryAggressivenessBps: Math.max(0, parseNumber(process.env.HEDGE_ENTRY_AGGRESSIVE_BPS, 5)),
+  maxCloseSlippagePct: Math.max(
+    0,
+    parseNumber(
+      process.env.HEDGE_MAX_CLOSE_SLIPPAGE_PCT ?? process.env.MAX_CLOSE_SLIPPAGE_PCT,
+      0.05
+    )
+  ),
+};
+
 export function isBasisStrategyEnabled(): boolean {
   const raw = process.env.ENABLE_BASIS_STRATEGY;
   if (!raw) return false;
