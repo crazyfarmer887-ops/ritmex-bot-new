@@ -294,17 +294,38 @@ export class BingxGateway {
       (value ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
     const normalized = normalize(requested);
     const markets = Object.values(this.exchange.markets) as Array<any>;
+    const matches: any[] = [];
+
     for (const market of markets) {
-      if (normalize(market.id) === normalized) return market;
+      const normalizedId = normalize(market.id);
+      const normalizedSymbol = normalize(market.symbol);
+      const baseQuote = normalize(`${market.base ?? ""}${market.quote ?? ""}`);
+      const baseQuotePerp = normalize(
+        `${market.base ?? ""}${market.quote ?? ""}${market.contract ? "PERP" : ""}`
+      );
+      if (
+        normalizedId === normalized ||
+        normalizedSymbol === normalized ||
+        baseQuote === normalized ||
+        baseQuotePerp === normalized
+      ) {
+        matches.push(market);
+      }
     }
-    for (const market of markets) {
-      if (normalize(market.symbol) === normalized) return market;
-    }
-    for (const market of markets) {
-      const combo = `${market.base ?? ""}${market.quote ?? ""}${market.contract ? "PERP" : ""}`;
-      if (normalize(combo) === normalized) return market;
-    }
-    return null;
+
+    if (!matches.length) return null;
+
+    const contractMatch = matches.find(
+      (market) => market.contract || market.swap || market.linear || market.future
+    );
+    if (contractMatch) return contractMatch;
+
+    const derivativeMatch = matches.find(
+      (market) => market.type === "swap" || market.type === "future" || market.derivative
+    );
+    if (derivativeMatch) return derivativeMatch;
+
+    return matches[0];
   }
 
   // ---- Polling -------------------------------------------------------------
