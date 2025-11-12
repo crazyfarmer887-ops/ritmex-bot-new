@@ -4,6 +4,7 @@ import { AsterExchangeAdapter } from "../src/exchanges/aster-adapter";
 import { GrvtExchangeAdapter } from "../src/exchanges/grvt/adapter";
 import { BackpackExchangeAdapter } from "../src/exchanges/backpack/adapter";
 import { ParadexExchangeAdapter } from "../src/exchanges/paradex/adapter";
+import { BingxExchangeAdapter } from "../src/exchanges/bingx/adapter";
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -30,6 +31,7 @@ describe("exchange factory", () => {
     expect(resolveExchangeId("ASTER")).toBe("aster");
     expect(resolveExchangeId("BACKPACK")).toBe("backpack");
     expect(resolveExchangeId("PaRaDeX")).toBe("paradex");
+    expect(resolveExchangeId("BINGX")).toBe("bingx");
   });
 
   it("creates grvt adapter when EXCHANGE=grvt", () => {
@@ -66,5 +68,17 @@ describe("exchange factory", () => {
     const adapter = createExchangeAdapter({ symbol: "BTC/USDC" });
     expect(adapter).toBeInstanceOf(ParadexExchangeAdapter);
     expect(adapter.id).toBe("paradex");
+  });
+
+  it("creates bingx adapter when EXCHANGE=bingx", () => {
+    process.env.EXCHANGE = "bingx";
+    process.env.BINGX_API_KEY = "api-key";
+    process.env.BINGX_API_SECRET = "secret";
+    process.env.BINGX_LEVERAGE = "50";
+    process.env.BINGX_SYMBOL = "BTCUSDT";
+
+    const adapter = createExchangeAdapter({ symbol: "BTCUSDT" });
+    expect(adapter).toBeInstanceOf(BingxExchangeAdapter);
+    expect(adapter.id).toBe("bingx");
   });
 });
