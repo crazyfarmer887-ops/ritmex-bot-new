@@ -4,6 +4,7 @@
  */
 
 import { resolveExchangeId, type SupportedExchangeId } from "./exchanges/create-adapter";
+import type { TimeInForce } from "./exchanges/types";
 
 export interface TradingConfig {
   symbol: string;
@@ -59,6 +60,17 @@ function parseBoolean(value: string | undefined, fallback: boolean): boolean {
   if (!normalized) return fallback;
   if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") return true;
   if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") return false;
+  return fallback;
+}
+
+function parseTimeInForce(value: string | undefined, fallback: TimeInForce): TimeInForce {
+  if (!value) return fallback;
+  const normalized = value.trim().toUpperCase();
+  if (!normalized) return fallback;
+  if (normalized === "IOC" || normalized === "IMMEDIATE_OR_CANCEL") return "IOC";
+  if (normalized === "FOK" || normalized === "FILL_OR_KILL") return "FOK";
+  if (normalized === "GTX" || normalized === "POST_ONLY" || normalized === "GOOD_TILL_TIME") return "GTX";
+  if (normalized === "GTC" || normalized === "GOOD_TILL_CANCEL" || normalized === "GOOD_TIL_CANCELLED") return "GTC";
   return fallback;
 }
 
@@ -212,3 +224,84 @@ export function isBasisStrategyEnabled(): boolean {
   const normalized = raw.trim().toLowerCase();
   return normalized === "1" || normalized === "true" || normalized === "yes";
 }
+
+export interface HedgedVolumeConfig {
+  grvtSymbol: string;
+  bingxSymbol: string;
+  quantity: number;
+  entrySlippageBps: number;
+  targetAbsRoiPct: number;
+  leverageAbs: number;
+  entryTimeInForce: TimeInForce;
+  exitTimeInForce: TimeInForce;
+  pollIntervalMs: number;
+  maxLogEntries: number;
+}
+
+const resolveGrvtSymbol = (): string => {
+  const candidate =
+    process.env.HEDGED_VOLUME_GRVT_SYMBOL ??
+    process.env.GRVT_SYMBOL ??
+    process.env.GRVT_INSTRUMENT ??
+    process.env.TRADE_SYMBOL;
+  if (candidate && candidate.trim()) {
+    return candidate.trim();
+  }
+  return resolveSymbolFromEnv("grvt");
+};
+
+const resolveBingxSymbol = (): string => {
+  const candidate =
+    process.env.HEDGED_VOLUME_BINGX_SYMBOL ??
+    process.env.BINGX_SYMBOL ??
+    process.env.TRADE_SYMBOL;
+  if (candidate && candidate.trim()) {
+    return candidate.trim().toUpperCase();
+  }
+  return resolveSymbolFromEnv("bingx");
+};
+
+const parsePositive = (value: number, fallback: number, min: number): number => {
+  if (!Number.isFinite(value) || value <= 0) {
+    return Math.max(fallback, min);
+  }
+  return Math.max(value, min);
+};
+
+export const hedgedVolumeConfig: HedgedVolumeConfig = {
+  grvtSymbol: resolveGrvtSymbol(),
+  bingxSymbol: resolveBingxSymbol(),
+  quantity: parsePositive(
+    parseNumber(
+      process.env.HEDGED_VOLUME_ORDER_SIZE ??
+        process.env.HEDGED_VOLUME_AMOUNT ??
+        process.env.TRADE_AMOUNT,
+      0.001
+    ),
+    0.001,
+    Number.EPSILON
+  ),
+  entrySlippageBps: Math.max(0, parseNumber(process.env.HEDGED_VOLUME_ENTRY_SLIPPAGE_BPS, 5)),
+  targetAbsRoiPct: Math.max(0.01, parseNumber(process.env.HEDGED_VOLUME_TARGET_ROI ?? process.env.HEDGED_VOLUME_TARGET_ROI_PCT, 5)),
+  leverageAbs: Math.max(
+    1,
+    parseNumber(
+      process.env.HEDGED_VOLUME_LEVERAGE,
+      parseNumber(process.env.BINGX_LEVERAGE ?? process.env.GRVT_LEVERAGE, 1)
+    )
+  ),
+  entryTimeInForce: parseTimeInForce(
+    process.env.HEDGED_VOLUME_ENTRY_TIF ?? process.env.HEDGED_VOLUME_TIF,
+    "IOC"
+  ),
+  exitTimeInForce: parseTimeInForce(
+    process.env.HEDGED_VOLUME_EXIT_TIF ?? process.env.HEDGED_VOLUME_EXIT_TIME_IN_FORCE,
+    "GTC"
+  ),
+  pollIntervalMs: parsePositive(
+    parseNumber(process.env.HEDGED_VOLUME_POLL_INTERVAL_MS, 1000),
+    1000,
+    200
+  ),
+  maxLogEntries: Math.max(50, Math.floor(parseNumber(process.env.HEDGED_VOLUME_MAX_LOG_ENTRIES, 200))),
+};

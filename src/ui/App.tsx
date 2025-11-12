@@ -6,12 +6,13 @@ import { MakerApp } from "./MakerApp";
 import { OffsetMakerApp } from "./OffsetMakerApp";
 import { GridApp } from "./GridApp";
 import { BasisApp } from "./BasisApp";
+import { HedgedVolumeApp } from "./HedgedVolumeApp";
 import { isBasisStrategyEnabled } from "../config";
 import { loadCopyrightFragments, verifyCopyrightIntegrity } from "../utils/copyright";
 import { resolveExchangeId } from "../exchanges/create-adapter";
 
 interface StrategyOption {
-  id: "trend" | "guardian" | "maker" | "offset-maker" | "basis" | "grid";
+  id: "trend" | "guardian" | "maker" | "offset-maker" | "basis" | "grid" | "hedged-volume";
   label: string;
   description: string;
   component: React.ComponentType<{ onExit: () => void }>;
@@ -50,6 +51,13 @@ const BASE_STRATEGIES: StrategyOption[] = [
   },
 ];
 
+const HEDGED_VOLUME_OPTION: StrategyOption = {
+  id: "hedged-volume",
+  label: "GRVT ↔ BingX 对冲刷量",
+  description: "GRVT 做多 + BingX 做空对冲刷量，按 ROI 阈值预挂平仓单",
+  component: HedgedVolumeApp,
+};
+
 const inputSupported = Boolean(process.stdin && (process.stdin as any).isTTY);
 
 export function App() {
@@ -58,20 +66,19 @@ export function App() {
   const copyright = useMemo(() => loadCopyrightFragments(), []);
   const integrityOk = useMemo(() => verifyCopyrightIntegrity(), []);
   const exchangeId = useMemo(() => resolveExchangeId(), []);
-  const strategies = useMemo(() => {
-    if (!isBasisStrategyEnabled()) {
-      return BASE_STRATEGIES;
-    }
-    return [
-      ...BASE_STRATEGIES,
-      {
-        id: "basis" as const,
-        label: "期现套利策略",
-        description: "监控期货与现货盘口差价，辅助发现套利机会",
-        component: BasisApp,
-      },
-    ];
-  }, []);
+    const strategies = useMemo(() => {
+      const items: StrategyOption[] = [...BASE_STRATEGIES];
+      if (isBasisStrategyEnabled()) {
+        items.push({
+          id: "basis" as const,
+          label: "期现套利策略",
+          description: "监控期货与现货盘口差价，辅助发现套利机会",
+          component: BasisApp,
+        });
+      }
+      items.push(HEDGED_VOLUME_OPTION);
+      return items;
+    }, []);
 
   useInput(
     (input, key) => {
