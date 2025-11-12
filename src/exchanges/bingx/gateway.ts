@@ -11,6 +11,7 @@ import type {
   AsterOrder,
   AsterTicker,
   CreateOrderParams,
+  OrderSide,
   OrderType,
   PositionSide,
 } from "../types";
@@ -45,6 +46,8 @@ const DEPTH_POLL_INTERVAL_MS = 1_000;
 const TICKER_POLL_INTERVAL_MS = 2_000;
 const KLINE_POLL_INTERVAL_MS = 5_000;
 
+export type BingxPositionMode = "HEDGE" | "ONE_WAY";
+
 export interface BingxGatewayOptions {
   apiKey: string;
   apiSecret: string;
@@ -52,6 +55,7 @@ export interface BingxGatewayOptions {
   leverage: number;
   marginMode?: string;
   testnet?: boolean;
+  positionMode?: BingxPositionMode;
   logger?: (context: string, error: unknown) => void;
 }
 
@@ -60,6 +64,7 @@ export class BingxGateway {
   private readonly symbol: string;
   private readonly leverage: number;
   private readonly marginMode: string;
+  private readonly positionMode: BingxPositionMode;
   private readonly logger: (context: string, error: unknown) => void;
   private marketSymbol: string;
   private market: any | null = null;
@@ -90,6 +95,7 @@ export class BingxGateway {
     this.symbol = normalizedSymbol;
     this.leverage = Number.isFinite(options.leverage) && options.leverage > 0 ? options.leverage : 50;
     this.marginMode = (options.marginMode ?? "ISOLATED").toUpperCase();
+    this.positionMode = options.positionMode ?? "ONE_WAY";
     this.logger = options.logger ?? ((context, error) => console.error(`[BingxGateway] ${context}:`, error));
     this.marketSymbol = this.symbol;
 
@@ -170,7 +176,8 @@ export class BingxGateway {
     await this.ensureInitialized();
     const symbol = this.marketSymbol;
     const normalizedType = this.normalizeOrderType(params.type);
-    const side = params.side.toLowerCase();
+    const orderSide = params.side.toUpperCase() as OrderSide;
+    const ccxtSide = orderSide.toLowerCase();
     const amount = params.quantity;
     let price = params.price;
 
@@ -187,8 +194,13 @@ export class BingxGateway {
     if (params.closePosition !== undefined) {
       extraParams.closePosition = params.closePosition === "true";
     }
-    extraParams.positionSide = "BOTH";
-    extraParams.marginMode = this.marginMode.toLowerCase();
+    const positionSide = this.resolvePositionSide(params);
+    if (positionSide) {
+      extraParams.positionSide = positionSide;
+    }
+    if (this.marginMode) {
+      extraParams.marginMode = this.marginMode.toLowerCase();
+    }
 
     let ccxtType: string;
     if (normalizedType === "STOP_MARKET") {
@@ -210,7 +222,7 @@ export class BingxGateway {
       extraParams.stopPrice = params.stopPrice;
     }
 
-    const order = await this.exchange.createOrder(symbol, ccxtType, side, amount, price, extraParams);
+    const order = await this.exchange.createOrder(symbol, ccxtType, ccxtSide, amount, price, extraParams);
     const mapped = this.mapOrder(order as CcxtOrder);
     this.localOrders.set(String(mapped.orderId), mapped);
     this.emitOrders();
@@ -266,8 +278,19 @@ export class BingxGateway {
     this.market = market;
     this.marketSymbol = market.symbol;
 
+    await this.configurePositionMode();
     await this.configureLeverage();
     this.initialized = true;
+  }
+
+  private async configurePositionMode(): Promise<void> {
+    try {
+      if (typeof this.exchange.setPositionMode === "function") {
+        await this.exchange.setPositionMode(this.positionMode === "HEDGE", this.marketSymbol);
+      }
+    } catch (error) {
+      this.logger("setPositionMode", error);
+    }
   }
 
   private async configureLeverage(): Promise<void> {
@@ -580,6 +603,17 @@ export class BingxGateway {
     const cumQuote = this.pickString([order.cost, info.executedQuoteQuantity]);
     const timestamp = order.timestamp ?? Date.now();
     const reduceOnly = Boolean(order.reduceOnly ?? info.reduceOnly ?? false);
+    const closePosition = Boolean(info.closePosition ?? info.close_position ?? (order as any).closePosition ?? false);
+    const rawPositionSide =
+      (info.positionSide as string | undefined) ??
+      (info.position_side as string | undefined) ??
+      ((order as any).positionSide as string | undefined) ??
+      ((order as any).position_side as string | undefined);
+    const fallbackPositionSide =
+      this.positionMode === "HEDGE"
+        ? this.computeHedgePositionSide(side as OrderSide, reduceOnly, closePosition)
+        : ("BOTH" as PositionSide);
+    const positionSide = this.normalizePositionSide(rawPositionSide) ?? fallbackPositionSide;
 
     return {
       orderId: String(order.id ?? ""),
@@ -595,10 +629,10 @@ export class BingxGateway {
       time: timestamp,
       updateTime: order.lastTradeTimestamp ?? timestamp,
       reduceOnly,
-      closePosition: Boolean(info.closePosition ?? false),
+      closePosition,
       avgPrice,
       cumQuote,
-      positionSide: "BOTH",
+      positionSide,
     };
   }
 
@@ -709,6 +743,46 @@ export class BingxGateway {
   private addStrings(a: string, b: string): string {
     const sum = Number(a) + Number(b);
     return Number.isFinite(sum) ? sum.toString() : "0";
+  }
+
+  private resolvePositionSide(params: CreateOrderParams): PositionSide | undefined {
+    const explicit = this.normalizePositionSide(params.positionSide);
+    if (explicit) {
+      if (this.positionMode === "HEDGE") {
+        return explicit;
+      }
+      return explicit === "BOTH" ? undefined : explicit;
+    }
+    if (this.positionMode !== "HEDGE") {
+      return undefined;
+    }
+    return this.computeHedgePositionSide(
+      params.side,
+      params.reduceOnly === "true",
+      params.closePosition === "true"
+    );
+  }
+
+  private normalizePositionSide(value: unknown): PositionSide | undefined {
+    if (typeof value !== "string") return undefined;
+    const normalized = value.trim().toUpperCase();
+    if (normalized === "LONG" || normalized === "SHORT" || normalized === "BOTH") {
+      return normalized as PositionSide;
+    }
+    return undefined;
+  }
+
+  private computeHedgePositionSide(
+    side: OrderSide | string,
+    reduceOnly: boolean,
+    closePosition: boolean
+  ): PositionSide {
+    const normalizedSide = (typeof side === "string" ? side.toUpperCase() : side) === "SELL" ? "SELL" : "BUY";
+    const shouldReduce = reduceOnly || closePosition;
+    if (shouldReduce) {
+      return normalizedSide === "BUY" ? "SHORT" : "LONG";
+    }
+    return normalizedSide === "BUY" ? "LONG" : "SHORT";
   }
 
   private normalizeStatus(status?: string): string {

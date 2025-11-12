@@ -8,7 +8,7 @@ import type {
 } from "../adapter";
 import type { AsterOrder, CreateOrderParams, ExchangePrecision } from "../types";
 import { extractMessage } from "../../utils/errors";
-import { BingxGateway, type BingxGatewayOptions } from "./gateway";
+import { BingxGateway, type BingxGatewayOptions, type BingxPositionMode } from "./gateway";
 
 export interface BingxCredentials {
   apiKey?: string;
@@ -16,6 +16,7 @@ export interface BingxCredentials {
   symbol?: string;
   leverage?: number;
   marginMode?: string;
+  positionMode?: BingxPositionMode;
   testnet?: boolean;
 }
 
@@ -36,6 +37,10 @@ export class BingxExchangeAdapter implements ExchangeAdapter {
       parseOptionalNumber(process.env.BINGX_LEVERAGE) ??
       50;
     const marginMode = credentials.marginMode ?? process.env.BINGX_MARGIN_MODE ?? "ISOLATED";
+    const positionMode =
+      credentials.positionMode ??
+      parsePositionMode(process.env.BINGX_POSITION_MODE) ??
+      (parseOptionalBoolean(process.env.BINGX_HEDGE_MODE) ? "HEDGE" : "ONE_WAY");
     const symbol =
       credentials.symbol ?? process.env.BINGX_SYMBOL ?? process.env.TRADE_SYMBOL ?? "BTCUSDT";
     const normalizedSymbol = symbol.trim().toUpperCase();
@@ -51,6 +56,7 @@ export class BingxExchangeAdapter implements ExchangeAdapter {
       symbol: normalizedSymbol,
       leverage: leverage > 0 ? leverage : 50,
       marginMode,
+      positionMode,
       testnet: credentials.testnet ?? parseOptionalBoolean(process.env.BINGX_TESTNET),
       logger: (context, error) => this.logError(context, error),
     };
@@ -197,5 +203,19 @@ function parseOptionalNumber(value: string | undefined): number | undefined {
   if (value == null) return undefined;
   const parsed = Number(value);
   if (Number.isFinite(parsed)) return parsed;
+  return undefined;
+}
+
+function parsePositionMode(value: string | undefined): BingxPositionMode | undefined {
+  if (value == null) return undefined;
+  const normalized = value.trim().toUpperCase().replace(/[\s-]/g, "_");
+  if (
+    ["HEDGE", "HEDGED", "HEDGE_MODE", "DUAL", "DUAL_SIDE", "DUAL_POSITION", "DUAL_SIDE_POSITION"].includes(normalized)
+  ) {
+    return "HEDGE";
+  }
+  if (["ONE_WAY", "ONEWAY", "SINGLE", "SINGLE_SIDE", "ONE_SIDE"].includes(normalized)) {
+    return "ONE_WAY";
+  }
   return undefined;
 }

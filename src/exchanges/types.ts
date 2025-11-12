@@ -24,6 +24,7 @@ export interface CreateOrderParams {
   timeInForce?: TimeInForce;
   reduceOnly?: StringBoolean;
   closePosition?: StringBoolean;
+  positionSide?: PositionSide;
   triggerType?: "UNSPECIFIED" | "TAKE_PROFIT" | "STOP_LOSS";
 }
 
