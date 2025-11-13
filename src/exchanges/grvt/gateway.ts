@@ -296,7 +296,7 @@ export class GrvtGateway {
       config.headers = merged;
       return config;
     });
-  }
+}
 
   async ensureInitialized(klineInterval: string): Promise<void> {
     if (this.initialized) return;
@@ -405,19 +405,11 @@ export class GrvtGateway {
       subAccountId: this.subAccountId,
     };
 
-    const signature = this.signatureProvider
+    const rawSignature = this.signatureProvider
       ? await this.signatureProvider(signContext)
       : await this.signWithPrivateKey(signContext);
 
-    if (!signature.expiration) {
-      signature.expiration = expirationNs.toString();
-    }
-    if (signature.nonce == null) {
-      signature.nonce = nonce;
-    }
-    if (!signature.r || !signature.s || typeof signature.v !== "number") {
-      throw new Error("Invalid signature returned for GRVT order");
-    }
+    const signature = normalizeGrvtSignature(rawSignature, { expirationNs, nonce });
 
     const signedOrder: GrvtSignedOrder = { ...unsignedOrder, signature };
 
@@ -904,6 +896,67 @@ export class GrvtGateway {
       nonce: context.nonce,
     };
   }
+}
+
+export function normalizeGrvtSignature(
+  raw: unknown,
+  context: { expirationNs: bigint; nonce: number }
+): GrvtSignature {
+  if (!raw || typeof raw !== "object") {
+    throw new Error(
+      "GRVT 签名器未返回有效签名，请检查 GRVT_SIGNER_PATH 配置或 GRVT_API_SECRET 是否正确"
+    );
+  }
+
+  const signature: Partial<GrvtSignature> & Record<string, unknown> = {
+    ...(raw as Record<string, unknown>),
+  };
+
+  if (signature.expiration == null || signature.expiration === "") {
+    signature.expiration = context.expirationNs.toString();
+  } else {
+    signature.expiration = signature.expiration.toString();
+  }
+
+  if (
+    signature.nonce == null ||
+    (typeof signature.nonce === "number" && !Number.isFinite(signature.nonce))
+  ) {
+    signature.nonce = context.nonce;
+  } else if (typeof signature.nonce !== "number") {
+    const parsedNonce = Number(signature.nonce);
+    if (!Number.isFinite(parsedNonce)) {
+      throw new Error("GRVT 签名器返回的 nonce 无效");
+    }
+    signature.nonce = parsedNonce;
+  }
+
+  if (typeof signature.signer !== "string" || !signature.signer.trim()) {
+    throw new Error("GRVT 签名器返回的 signer 无效");
+  }
+  if (typeof signature.r !== "string" || !signature.r.trim()) {
+    throw new Error("GRVT 签名器返回的签名缺少 r 字段");
+  }
+  if (typeof signature.s !== "string" || !signature.s.trim()) {
+    throw new Error("GRVT 签名器返回的签名缺少 s 字段");
+  }
+
+  if (typeof signature.v !== "number" || !Number.isFinite(signature.v)) {
+    const parsedV = Number(signature.v);
+    if (!Number.isFinite(parsedV)) {
+      throw new Error("GRVT 签名器返回的签名缺少有效的 v 字段");
+    }
+    signature.v = parsedV;
+  }
+
+  return {
+    signer: signature.signer,
+    r: signature.r,
+    s: signature.s,
+    v: signature.v,
+    expiration: signature.expiration,
+    nonce: signature.nonce,
+  };
 }
 
 function normalizeEnvironment(env: GrvtEnvironment | undefined): BaseEnvironment {
