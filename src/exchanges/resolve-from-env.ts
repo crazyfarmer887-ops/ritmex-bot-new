@@ -5,6 +5,7 @@ import type { LighterCredentials } from "./lighter/adapter";
 import type { BackpackCredentials } from "./backpack/adapter";
 import type { ParadexCredentials } from "./paradex/adapter";
 import type { BingxCredentials } from "./bingx/adapter";
+import type { GrvtCredentials } from "./grvt/adapter";
 
 interface BuildAdapterOptions {
   symbol: string;
@@ -38,6 +39,11 @@ export function buildAdapterFromEnv(options: BuildAdapterOptions): ExchangeAdapt
   if (id === "bingx") {
     const credentials = resolveBingxCredentials(symbol);
     return createExchangeAdapter({ exchange: id, symbol, bingx: credentials });
+  }
+
+  if (id === "grvt") {
+    const credentials = resolveGrvtCredentials(symbol);
+    return createExchangeAdapter({ exchange: id, symbol, grvt: credentials });
   }
 
   return createExchangeAdapter({ exchange: id, symbol, grvt: { symbol } });
@@ -135,6 +141,55 @@ function resolveBingxCredentials(symbol: string): BingxCredentials {
     marginMode: process.env.BINGX_MARGIN_MODE,
     testnet: parseOptionalBoolean(process.env.BINGX_TESTNET),
   };
+  return credentials;
+}
+
+function resolveGrvtCredentials(symbol: string): GrvtCredentials {
+  const apiKey = process.env.GRVT_API_KEY;
+  const apiSecret = process.env.GRVT_API_SECRET;
+  const cookie = process.env.GRVT_COOKIE;
+  const accountId = process.env.GRVT_ACCOUNT_ID;
+  const subAccountId = process.env.GRVT_SUB_ACCOUNT_ID;
+  const instrument = process.env.GRVT_INSTRUMENT;
+  const signerPath = process.env.GRVT_SIGNER_PATH;
+
+  // Validate authentication method
+  if (!cookie || !accountId) {
+    if (!apiKey) {
+      throw new Error(
+        "GRVT 需要配置以下环境变量之一:\n" +
+          "  方式1: GRVT_COOKIE 与 GRVT_ACCOUNT_ID\n" +
+          "  方式2: GRVT_API_KEY (以及 GRVT_API_SECRET 或 GRVT_SIGNER_PATH)"
+      );
+    }
+  }
+
+  // Required fields
+  if (!subAccountId) {
+    throw new Error("GRVT 需要配置 GRVT_SUB_ACCOUNT_ID 环境变量");
+  }
+  if (!instrument) {
+    throw new Error("GRVT 需要配置 GRVT_INSTRUMENT 环境变量");
+  }
+
+  // Validate API secret or signer if using API key
+  if (apiKey && !apiSecret && !signerPath) {
+    throw new Error(
+      "使用 GRVT_API_KEY 时，需要配置 GRVT_API_SECRET 或 GRVT_SIGNER_PATH 环境变量"
+    );
+  }
+
+  const credentials: GrvtCredentials = {
+    apiKey,
+    apiSecret,
+    cookie,
+    accountId,
+    subAccountId,
+    instrument,
+    symbol: process.env.GRVT_SYMBOL ?? symbol,
+    env: process.env.GRVT_ENV as GrvtCredentials["env"],
+  };
+
   return credentials;
 }
 
