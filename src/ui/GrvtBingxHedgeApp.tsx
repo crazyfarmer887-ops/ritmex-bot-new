@@ -5,6 +5,7 @@ import { buildAdapterFromEnv } from "../exchanges/resolve-from-env";
 import {
   GrvtBingxHedgeEngine,
   type GrvtBingxHedgeSnapshot,
+  type HedgeStatus,
 } from "../strategy/grvt-bingx-hedge-engine";
 import { formatNumber } from "../utils/format";
 
@@ -18,6 +19,17 @@ export function GrvtBingxHedgeApp({ onExit }: GrvtBingxHedgeAppProps) {
   const [snapshot, setSnapshot] = useState<GrvtBingxHedgeSnapshot | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const engineRef = useRef<GrvtBingxHedgeEngine | null>(null);
+  const statusLabelMap = useRef<Record<HedgeStatus, string>>({
+    initializing: "初始化",
+    "waiting-market": "等待盘口",
+    "placing-entry": "布置入场挂单",
+    "entry-working": "等待入场成交",
+    "placing-exit": "布置止盈挂单",
+    "exit-working": "等待止盈成交",
+    "cycle-complete": "循环完成",
+    stopped: "已停止",
+    error: "错误",
+  });
 
   useInput(
     (_input, key) => {
@@ -83,6 +95,8 @@ export function GrvtBingxHedgeApp({ onExit }: GrvtBingxHedgeAppProps) {
 
   const {
     status,
+    cycle,
+    autoRestart,
     ready,
     entryAverage,
     exitTargets,
@@ -92,16 +106,18 @@ export function GrvtBingxHedgeApp({ onExit }: GrvtBingxHedgeAppProps) {
   } = snapshot;
 
   const lastLogs = tradeLog.slice(-6);
+  const statusText = statusLabelMap.current[status] ?? status;
 
   return (
     <Box flexDirection="column" paddingX={1} paddingY={0}>
       <Box flexDirection="column" marginBottom={1}>
         <Text color="cyanBright">GRVT-BingX 双腿对冲面板</Text>
         <Text>
-          状态: {status} ｜ 数据就绪: {ready ? "是" : "否"} ｜ ROI 目标: {roiTargetText}%
+          状态: {statusText} ｜ 循环: #{cycle} ｜ 自动重启: {autoRestart ? "开" : "关"} ｜ 数据就绪:{" "}
+          {ready ? "是" : "否"}
         </Text>
         <Text>
-          入场均价: {formatNumber(entryAverage, 2, "-")} ｜ 预设平仓价: GRVT{" "}
+          ROI 目标: {roiTargetText}% ｜ 入场均价: {formatNumber(entryAverage, 2, "-")} ｜ 预设平仓价: GRVT{" "}
           {formatNumber(exitTargets.grvt, 2, "-")} ｜ BingX {formatNumber(exitTargets.bingx, 2, "-")}
         </Text>
         <Text color="gray">

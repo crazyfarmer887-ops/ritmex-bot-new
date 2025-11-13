@@ -125,6 +125,26 @@ curl -fsSL https://github.com/discountry/ritmex-bot/raw/refs/heads/main/setup.sh
 3. 默认连接主网，若需测试网，将 `PARADEX_SANDBOX=true` 并根据需要调整 `PARADEX_SYMBOL`。
 4. 复杂环境可额外设置 `PARADEX_USE_PRO`、`PARADEX_RECONNECT_DELAY_MS` 或调试开关。
 
+## GRVT-BingX 对冲模式
+- **思路概览**：在 GRVT 做多、BingX 做空，同步建立小仓位后，立即挂出两侧的止盈单以锁定目标 ROI。实现方式是长腿限价买入 + 短腿限价卖出，仓位形成后自动计算加权均价，并按 `HEDGE_EXIT_ROI_PERCENT` 计算止盈价格。
+- **环境变量**：
+  - `HEDGE_ORDER_AMOUNT`：双腿下单数量（标的资产计）。根据逐仓杠杆预留保证金，建议从 0.001 开始逐步放大。
+  - `HEDGE_EXIT_ROI_PERCENT`：目标 ROI（百分比），默认 5 表示 +5%/-5% 止盈。
+  - `HEDGE_AUTO_RESTART`：是否在一次循环完成后自动重新布置对冲单，默认 `true`。
+  - `HEDGE_GRVT_SYMBOL` / `HEDGE_BINGX_SYMBOL`：若两边合约代码不同，可显式指定；未设置时分别回退至 `GRVT_SYMBOL`、`BINGX_SYMBOL` 或通用 `TRADE_SYMBOL`。
+  - 精度相关变量 `HEDGE_GRVT_PRICE_TICK`、`HEDGE_GRVT_QTY_STEP`、`HEDGE_BINGX_PRICE_TICK`、`HEDGE_BINGX_QTY_STEP` 可按交易所实际最小变动值覆盖。
+- **运行步骤**：
+  1. 在 `.env` 中写入 GRVT 与 BingX 的 API Key/Secret，并确保两边已开启单向持仓模式与足够杠杆。
+  2. 设置上述对冲参数，保存 `.env` 后执行 `bun run index.ts`。
+  3. 菜单中选择 `GRVT-BingX Hedge`，或使用命令 `bun run index.ts --strategy grvt-bingx-hedge --silent` 静默启动。
+  4. 仪表盘会显示当前循环编号、自动重启状态、目标 ROI、入场均价及预设退出价。日志面板同步打印订单事件。
+- **状态机说明**：
+  - `等待盘口`：等待两边账户 / 订单 / 深度三路订阅就绪。
+  - `布置入场挂单` → `等待入场成交`：在盘口上一档挂出多腿买单与空腿卖单，如行情偏移会持续等待。
+  - `布置止盈挂单`：仓位形成后根据最新均价计算止盈价，提前挂出 reduceOnly 限价。
+  - `等待止盈成交`：两侧仓位全部扁平后对冲循环结束，若 `HEDGE_AUTO_RESTART=true` 会自动进入下一轮。
+- **风控建议**：两边账户请预留足够保证金；若某腿出现异常持仓，策略会暂停新一轮入场，需要人工干预清理后再继续。
+
 ## 命令速查
 ```bash
 bun run index.ts   # 启动 CLI（默认入口）

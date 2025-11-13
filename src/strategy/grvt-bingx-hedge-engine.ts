@@ -12,14 +12,14 @@ import { extractMessage } from "../utils/errors";
 
 type HedgeEvent = "update";
 
-type HedgeStatus =
+export type HedgeStatus =
   | "initializing"
-  | "waiting-entry"
+  | "waiting-market"
   | "placing-entry"
-  | "entry-submitted"
+  | "entry-working"
   | "placing-exit"
-  | "exit-submitted"
-  | "completed"
+  | "exit-working"
+  | "cycle-complete"
   | "stopped"
   | "error";
 
@@ -90,6 +90,8 @@ interface HedgeLegPublicSnapshot {
 export interface GrvtBingxHedgeSnapshot {
   ready: boolean;
   status: HedgeStatus;
+  cycle: number;
+  autoRestart: boolean;
   roiTargetPercent: number;
   entryAverage: number | null;
   exitTargets: {
@@ -112,6 +114,50 @@ interface HedgeEngineDeps {
 }
 
 const POSITION_EPS = 1e-6;
+const EXIT_QTY_EPS = 1e-9;
+
+export function adjustHedgePrice(price: number, tick: number, direction: "up" | "down"): number {
+  if (!Number.isFinite(price) || price <= 0) return price;
+  if (!Number.isFinite(tick) || tick <= 0) return Number(price.toFixed(6));
+  const decimals = Math.min(12, Math.max(0, decimalsOf(tick)));
+  const ratio = price / tick;
+  let units: number;
+  if (direction === "up") {
+    units = Math.ceil(ratio - 1e-9);
+  } else {
+    units = Math.floor(ratio + 1e-9);
+  }
+  if (!Number.isFinite(units) || units <= 0) {
+    units = 1;
+  }
+  const adjusted = units * tick;
+  return Number(adjusted.toFixed(decimals));
+}
+
+export function adjustHedgeQuantity(qty: number, step: number): number {
+  if (!Number.isFinite(qty) || qty <= 0) return 0;
+  if (!Number.isFinite(step) || step <= 0) return qty;
+  const rounded = roundQtyDownToStep(qty, step);
+  const decimals = Math.min(12, Math.max(0, decimalsOf(step)));
+  return Number(rounded.toFixed(decimals));
+}
+
+export function computeHedgeExitPrice(
+  entryBasis: number,
+  roiDecimal: number,
+  direction: HedgeLegDirection,
+  tick: number
+): number {
+  const normalizedEntry = Number(entryBasis);
+  if (!Number.isFinite(normalizedEntry) || normalizedEntry <= 0) {
+    return normalizedEntry;
+  }
+  const normalizedRoi = Math.max(0, roiDecimal);
+  const multiplier = direction === "long" ? 1 + normalizedRoi : 1 - normalizedRoi;
+  const rawPrice = normalizedEntry * multiplier;
+  const adjustDirection = direction === "long" ? "up" : "down";
+  return adjustHedgePrice(rawPrice, tick, adjustDirection);
+}
 
 export class GrvtBingxHedgeEngine {
   private readonly events = new StrategyEventEmitter<HedgeEvent, GrvtBingxHedgeSnapshot>();
@@ -124,11 +170,17 @@ export class GrvtBingxHedgeEngine {
   private timer: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
   private errorMessage: string | null = null;
+  private cycle = 0;
 
   private entryAverage: number | null = null;
   private exitTargets: { grvt: number | null; bingx: number | null } = { grvt: null, bingx: null };
-  private entryCompletionLogged = false;
-  private exitCompletionLogged = false;
+
+  private entryLogged = false;
+  private exitLogged = false;
+  private cycleLogged = false;
+
+  private entryPlacementInFlight = false;
+  private exitPlacementInFlight = false;
 
   constructor(private readonly config: HedgeConfig, deps: HedgeEngineDeps) {
     this.now = deps.now ?? (() => Date.now());
@@ -172,6 +224,7 @@ export class GrvtBingxHedgeEngine {
   start(): void {
     if (this.timer || this.status === "error") return;
     this.stopped = false;
+    this.status = "initializing";
     this.timer = setInterval(() => this.evaluate(), this.config.pollIntervalMs);
     void this.initialize();
   }
@@ -182,7 +235,7 @@ export class GrvtBingxHedgeEngine {
       clearInterval(this.timer);
       this.timer = null;
     }
-    if (this.status !== "completed") {
+    if (this.status !== "error") {
       this.status = "stopped";
     }
     this.emitUpdate();
@@ -271,12 +324,12 @@ export class GrvtBingxHedgeEngine {
         this.cancelAllOrders(this.legs.grvt, "启动清理"),
         this.cancelAllOrders(this.legs.bingx, "启动清理"),
       ]);
-      this.tradeLog.push("info", "已清理两腿历史挂单，准备进场");
+      this.tradeLog.push("info", "已清理两腿历史挂单，等待盘口同步");
     } catch (error) {
       this.tradeLog.push("warn", `启动清理挂单失败: ${extractMessage(error)}`);
     } finally {
       if (this.status !== "error") {
-        this.status = "waiting-entry";
+        this.status = "waiting-market";
         this.emitUpdate();
         this.evaluate();
       }
@@ -311,9 +364,7 @@ export class GrvtBingxHedgeEngine {
     safeSubscribe<AsterOrder[]>(
       leg.adapter.watchOrders.bind(leg.adapter),
       (orders) => {
-        leg.orders = Array.isArray(orders)
-          ? orders.filter((order) => order.symbol === leg.symbol)
-          : [];
+        leg.orders = Array.isArray(orders) ? orders.filter((order) => order.symbol === leg.symbol) : [];
         if (!leg.feedReady.orders) {
           this.tradeLog.push("info", `[${leg.label}] 订单数据已同步`);
         }
@@ -376,91 +427,98 @@ export class GrvtBingxHedgeEngine {
   private evaluate(): void {
     if (this.stopped || this.status === "error") return;
 
-    if (this.status === "waiting-entry") {
-      if (this.canPlaceEntry()) {
-        void this.placeEntryOrders();
-      }
-      return;
-    }
-
-    if (this.status === "entry-submitted" || this.status === "placing-exit") {
-      if (this.areEntriesFilled()) {
-        if (!this.entryCompletionLogged) {
-          this.entryCompletionLogged = true;
-          this.tradeLog.push("info", "双腿入场已全部成交，准备布置退出挂单");
-        }
-        if (!this.exitOrdersPlaced()) {
-          void this.placeExitOrders();
-        }
-      }
-      return;
-    }
-
-    if (this.status === "exit-submitted") {
-      if (this.areExitsFilled()) {
-        if (!this.exitCompletionLogged) {
-          this.exitCompletionLogged = true;
-          this.tradeLog.push("success", "对冲仓位已全部退出");
-        }
-        this.status = "completed";
+    if (!this.marketReady()) {
+      if (this.status !== "initializing" && this.status !== "waiting-market") {
+        this.status = "waiting-market";
         this.emitUpdate();
       }
+      return;
+    }
+
+    if (this.shouldSubmitEntries()) {
+      void this.placeEntryOrders();
+      return;
+    }
+
+    if (this.status === "placing-entry" || this.status === "entry-working") {
+      this.status = "entry-working";
+      this.updateEntryMetrics();
+      void this.ensureExitOrders();
+      if (this.areEntriesSatisfied() && !this.entryLogged) {
+        this.entryLogged = true;
+        this.tradeLog.push("info", "双腿仓位已建立，等待止盈挂单确认");
+        this.emitUpdate();
+      }
+      return;
+    }
+
+    if (this.status === "placing-exit" || this.status === "exit-working") {
+      if (this.isExitComplete()) {
+        this.finishCycle();
+      }
+      return;
     }
   }
 
-  private canPlaceEntry(): boolean {
-    if (this.status !== "waiting-entry") return false;
-    if (!Number.isFinite(this.config.orderAmount) || this.config.orderAmount <= 0) {
-      return false;
-    }
+  private marketReady(): boolean {
+    return Object.values(this.legs).every(
+      (leg) => leg.feedReady.account && leg.feedReady.orders && leg.feedReady.depth
+    );
+  }
+
+  private shouldSubmitEntries(): boolean {
+    if (this.status !== "waiting-market") return false;
+    if (this.entryPlacementInFlight || this.exitPlacementInFlight) return false;
+    if (!Number.isFinite(this.config.orderAmount) || this.config.orderAmount <= 0) return false;
     const legs = Object.values(this.legs);
     for (const leg of legs) {
-      if (!leg.feedReady.account || !leg.feedReady.orders || !leg.feedReady.depth) {
+      if (!this.marketDataReadyForEntry(leg) || !this.isLegFlat(leg)) {
         return false;
       }
-      if (!this.hasMarketDataForEntry(leg)) {
-        return false;
-      }
-      if (!this.isLegFlat(leg)) {
-        if (!this.entryCompletionLogged) {
-          this.tradeLog.push(
-            "warn",
-            `[${leg.label}] 当前已有持仓 (${leg.position.positionAmt}), 等待人工处理后再进场`
-          );
-          this.entryCompletionLogged = true;
-        }
-        return false;
-      }
+    }
+    if (this.entryOrdersWorking() || this.exitOrdersWorking()) {
+      return false;
     }
     return true;
   }
 
-  private hasMarketDataForEntry(leg: HedgeLegState): boolean {
+  private marketDataReadyForEntry(leg: HedgeLegState): boolean {
     if (leg.entrySide === "BUY") {
       return Number.isFinite(leg.topAsk ?? NaN);
     }
     return Number.isFinite(leg.topBid ?? NaN);
   }
 
+  private entryOrdersWorking(): boolean {
+    return this.legs.grvt.entryOrderId != null || this.legs.bingx.entryOrderId != null;
+  }
+
+  private exitOrdersWorking(): boolean {
+    return this.legs.grvt.exitOrderId != null || this.legs.bingx.exitOrderId != null;
+  }
+
   private async placeEntryOrders(): Promise<void> {
-    if (this.status !== "waiting-entry") return;
+    if (this.entryPlacementInFlight) return;
+    this.entryPlacementInFlight = true;
     this.status = "placing-entry";
+    this.emitUpdate();
     const longLeg = this.legs.grvt;
     const shortLeg = this.legs.bingx;
+
     try {
       const longPriceRaw = longLeg.entrySide === "BUY" ? longLeg.topAsk : longLeg.topBid;
       const shortPriceRaw = shortLeg.entrySide === "SELL" ? shortLeg.topBid : shortLeg.topAsk;
       if (!Number.isFinite(longPriceRaw) || !Number.isFinite(shortPriceRaw)) {
-        throw new Error("无法获取最新盘口价格，稍后重试");
+        throw new Error("盘口数据不足，无法计算对冲价格");
       }
 
-      const longPrice = this.adjustPrice(longPriceRaw as number, longLeg.priceTick, "up");
-      const shortPrice = this.adjustPrice(shortPriceRaw as number, shortLeg.priceTick, "down");
-      const longQty = this.adjustQuantity(this.config.orderAmount, longLeg.qtyStep);
-      const shortQty = this.adjustQuantity(this.config.orderAmount, shortLeg.qtyStep);
+      const longPrice = adjustHedgePrice(longPriceRaw as number, longLeg.priceTick, "up");
+      const shortPrice = adjustHedgePrice(shortPriceRaw as number, shortLeg.priceTick, "down");
+      const longQty = adjustHedgeQuantity(this.config.orderAmount, longLeg.qtyStep);
+      const shortQty = adjustHedgeQuantity(this.config.orderAmount, shortLeg.qtyStep);
 
       if (longQty <= 0 || shortQty <= 0) {
-        throw new Error("对冲下单数量在精度处理后无效，请调大 HEDGE_ORDER_AMOUNT");
+        throw new Error("对冲下单数量在精度处理后无效，请提升 HEDGE_ORDER_AMOUNT");
       }
 
       const entryOrders: Partial<Record<HedgeLegKey, AsterOrder>> = {};
@@ -497,12 +555,12 @@ export class GrvtBingxHedgeEngine {
         this.tradeLog.push("error", `入场挂单失败: ${message}`);
         this.errorMessage = message;
         if (entryOrders.grvt) {
-          await this.cancelSpecificOrder(longLeg, entryOrders.grvt.orderId, "入场失败回滚(GRVT)");
+          await this.cancelSpecificOrder(longLeg, entryOrders.grvt.orderId, "入场失败回滚 (GRVT)");
         }
         if (entryOrders.bingx) {
-          await this.cancelSpecificOrder(shortLeg, entryOrders.bingx.orderId, "入场失败回滚(BingX)");
+          await this.cancelSpecificOrder(shortLeg, entryOrders.bingx.orderId, "入场失败回滚 (BingX)");
         }
-        this.status = "waiting-entry";
+        this.status = "waiting-market";
         this.emitUpdate();
         return;
       }
@@ -518,22 +576,16 @@ export class GrvtBingxHedgeEngine {
       shortLeg.lastKnownEntryStatus = entryOrders.bingx?.status ?? "NEW";
 
       this.entryAverage = (longPrice + shortPrice) / 2;
-      this.exitTargets.grvt =
-        this.roiDecimal > 0
-          ? this.adjustPrice(this.entryAverage * (1 + this.roiDecimal), longLeg.priceTick, "up")
-          : longPrice;
-      this.exitTargets.bingx =
-        this.roiDecimal > 0
-          ? this.adjustPrice(this.entryAverage * (1 - this.roiDecimal), shortLeg.priceTick, "down")
-          : shortPrice;
+      this.ensureExitTargetsFromBasis(this.entryAverage);
 
-      this.entryCompletionLogged = false;
-      this.exitCompletionLogged = false;
-      this.status = "entry-submitted";
+      this.entryLogged = false;
+      this.exitLogged = false;
+      this.cycleLogged = false;
       this.errorMessage = null;
+      this.status = "entry-working";
       this.tradeLog.push(
         "info",
-        `入场挂单完成 ｜ 平均价 ${this.entryAverage?.toFixed(4) ?? "-"} ｜ ROI 目标 ${(
+        `对冲挂单已布置 ｜ 均价 ${this.entryAverage?.toFixed(4) ?? "-"} ｜ ROI ${(
           this.roiDecimal * 100
         ).toFixed(2)}%`
       );
@@ -542,111 +594,34 @@ export class GrvtBingxHedgeEngine {
       const message = extractMessage(error);
       this.tradeLog.push("error", `准备入场失败: ${message}`);
       this.errorMessage = message;
-      this.status = "waiting-entry";
+      this.status = "waiting-market";
       this.emitUpdate();
+    } finally {
+      this.entryPlacementInFlight = false;
     }
   }
 
-  private async placeExitOrders(): Promise<void> {
-    if (this.status !== "entry-submitted" && this.status !== "placing-exit") return;
-    if (this.exitOrdersPlaced()) return;
-    this.status = "placing-exit";
-
-    const longLeg = this.legs.grvt;
-    const shortLeg = this.legs.bingx;
-    try {
-      const longQty = this.adjustQuantity(this.getLegExitQuantity(longLeg), longLeg.qtyStep);
-      const shortQty = this.adjustQuantity(this.getLegExitQuantity(shortLeg), shortLeg.qtyStep);
-      if (longQty <= 0 || shortQty <= 0) {
-        throw new Error("退出数量无效，持仓尚未形成或账户快照未刷新");
-      }
-
-      const longPriceTarget =
-        this.exitTargets.grvt ??
-        this.adjustPrice(
-          (this.entryAverage ?? longLeg.entryLimitPrice ?? longLeg.topBid ?? 0) * (1 + this.roiDecimal),
-          longLeg.priceTick,
-          "up"
-        );
-      const shortPriceTarget =
-        this.exitTargets.bingx ??
-        this.adjustPrice(
-          (this.entryAverage ?? shortLeg.entryLimitPrice ?? shortLeg.topAsk ?? 0) * (1 - this.roiDecimal),
-          shortLeg.priceTick,
-          "down"
-        );
-
-      const exitOrders: Partial<Record<HedgeLegKey, AsterOrder>> = {};
-      try {
-        exitOrders.grvt = await longLeg.adapter.createOrder({
-          symbol: longLeg.symbol,
-          side: longLeg.exitSide,
-          type: "LIMIT",
-          price: longPriceTarget,
-          quantity: longQty,
-          timeInForce: "GTC",
-          reduceOnly: "true",
-        });
-        this.tradeLog.push(
-          "order",
-          `[${longLeg.label}] 退出挂单 ${longLeg.exitSide} ${longQty} @ ${longPriceTarget} (reduceOnly)`
-        );
-
-        exitOrders.bingx = await shortLeg.adapter.createOrder({
-          symbol: shortLeg.symbol,
-          side: shortLeg.exitSide,
-          type: "LIMIT",
-          price: shortPriceTarget,
-          quantity: shortQty,
-          timeInForce: "GTC",
-          reduceOnly: "true",
-        });
-        this.tradeLog.push(
-          "order",
-          `[${shortLeg.label}] 退出挂单 ${shortLeg.exitSide} ${shortQty} @ ${shortPriceTarget} (reduceOnly)`
-        );
-      } catch (error) {
-        const message = extractMessage(error);
-        this.tradeLog.push("error", `退出挂单失败: ${message}`);
-        this.errorMessage = message;
-        if (exitOrders.grvt) {
-          await this.cancelSpecificOrder(longLeg, exitOrders.grvt.orderId, "退出失败回滚(GRVT)");
-        }
-        if (exitOrders.bingx) {
-          await this.cancelSpecificOrder(shortLeg, exitOrders.bingx.orderId, "退出失败回滚(BingX)");
-        }
-        this.status = "entry-submitted";
-        this.emitUpdate();
-        return;
-      }
-
-      longLeg.exitOrderId = exitOrders.grvt?.orderId ?? longLeg.exitOrderId;
-      longLeg.exitTargetQty = longQty;
-      longLeg.exitLimitPrice = longPriceTarget;
-      longLeg.lastKnownExitStatus = exitOrders.grvt?.status ?? "NEW";
-
-      shortLeg.exitOrderId = exitOrders.bingx?.orderId ?? shortLeg.exitOrderId;
-      shortLeg.exitTargetQty = shortQty;
-      shortLeg.exitLimitPrice = shortPriceTarget;
-      shortLeg.lastKnownExitStatus = exitOrders.bingx?.status ?? "NEW";
-
-      this.status = "exit-submitted";
-      this.errorMessage = null;
-      this.emitUpdate();
-    } catch (error) {
-      const message = extractMessage(error);
-      this.tradeLog.push("error", `准备退出失败: ${message}`);
-      this.errorMessage = message;
-      this.status = "entry-submitted";
-      this.emitUpdate();
+  private updateEntryMetrics(): void {
+    const longEntry = this.legs.grvt.position.entryPrice;
+    const shortEntry = this.legs.bingx.position.entryPrice;
+    if (Number.isFinite(longEntry) && Number.isFinite(shortEntry) && longEntry > 0 && shortEntry > 0) {
+      this.entryAverage = (longEntry + shortEntry) / 2;
+      this.ensureExitTargetsFromBasis(this.entryAverage);
     }
   }
 
-  private exitOrdersPlaced(): boolean {
-    return this.legs.grvt.exitOrderId != null && this.legs.bingx.exitOrderId != null;
+  private ensureExitTargetsFromBasis(basis: number | null): { grvt: number | null; bingx: number | null } {
+    const normalizedBasis = Number(basis);
+    if (!Number.isFinite(normalizedBasis) || normalizedBasis <= 0) {
+      return this.exitTargets;
+    }
+    const grvtTarget = computeHedgeExitPrice(normalizedBasis, this.roiDecimal, "long", this.legs.grvt.priceTick);
+    const bingxTarget = computeHedgeExitPrice(normalizedBasis, this.roiDecimal, "short", this.legs.bingx.priceTick);
+    this.exitTargets = { grvt: grvtTarget, bingx: bingxTarget };
+    return this.exitTargets;
   }
 
-  private areEntriesFilled(): boolean {
+  private areEntriesSatisfied(): boolean {
     const grvtQty = Math.abs(this.legs.grvt.position.positionAmt);
     const bingxQty = Math.abs(this.legs.bingx.position.positionAmt);
     const grvtTarget = this.legs.grvt.entryTargetQty;
@@ -658,20 +633,213 @@ export class GrvtBingxHedgeEngine {
     );
   }
 
-  private areExitsFilled(): boolean {
+  private async ensureExitOrders(): Promise<void> {
+    if (this.exitPlacementInFlight) return;
+
+    const longQty = adjustHedgeQuantity(Math.abs(this.legs.grvt.position.positionAmt), this.legs.grvt.qtyStep);
+    const shortQty = adjustHedgeQuantity(Math.abs(this.legs.bingx.position.positionAmt), this.legs.bingx.qtyStep);
+
+    if (longQty <= 0 || shortQty <= 0) {
+      return;
+    }
+
+    const needsLong =
+      this.legs.grvt.exitOrderId == null ||
+      Math.abs(this.legs.grvt.exitTargetQty - longQty) > EXIT_QTY_EPS;
+    const needsShort =
+      this.legs.bingx.exitOrderId == null ||
+      Math.abs(this.legs.bingx.exitTargetQty - shortQty) > EXIT_QTY_EPS;
+
+    if (!needsLong && !needsShort) {
+      if (!this.exitLogged) {
+        this.status = "exit-working";
+        this.exitLogged = true;
+        this.tradeLog.push("info", "止盈挂单已就绪，等待成交退出");
+        this.emitUpdate();
+      }
+      return;
+    }
+
+    this.exitPlacementInFlight = true;
+    this.status = "placing-exit";
+    this.emitUpdate();
+
+    try {
+      const entryBasis = this.entryAverage ?? this.resolveEntryBasis();
+      const { grvt: longTarget, bingx: shortTarget } = this.ensureExitTargetsFromBasis(entryBasis);
+
+      const cancellations: Array<Promise<void>> = [];
+      if (needsLong && this.legs.grvt.exitOrderId != null) {
+        cancellations.push(
+          this.cancelSpecificOrder(this.legs.grvt, this.legs.grvt.exitOrderId, "更新止盈 (GRVT)")
+        );
+      }
+      if (needsShort && this.legs.bingx.exitOrderId != null) {
+        cancellations.push(
+          this.cancelSpecificOrder(this.legs.bingx, this.legs.bingx.exitOrderId, "更新止盈 (BingX)")
+        );
+      }
+      if (cancellations.length) {
+        await Promise.all(cancellations);
+      }
+
+      const exitOrders: Partial<Record<HedgeLegKey, AsterOrder>> = {};
+      try {
+        if (needsLong) {
+          exitOrders.grvt = await this.legs.grvt.adapter.createOrder({
+            symbol: this.legs.grvt.symbol,
+            side: this.legs.grvt.exitSide,
+            type: "LIMIT",
+            price: longTarget,
+            quantity: longQty,
+            timeInForce: "GTC",
+            reduceOnly: "true",
+          });
+          this.tradeLog.push(
+            "order",
+            `[${this.legs.grvt.label}] 止盈挂单 ${this.legs.grvt.exitSide} ${longQty} @ ${longTarget}`
+          );
+        }
+
+        if (needsShort) {
+          exitOrders.bingx = await this.legs.bingx.adapter.createOrder({
+            symbol: this.legs.bingx.symbol,
+            side: this.legs.bingx.exitSide,
+            type: "LIMIT",
+            price: shortTarget,
+            quantity: shortQty,
+            timeInForce: "GTC",
+            reduceOnly: "true",
+          });
+          this.tradeLog.push(
+            "order",
+            `[${this.legs.bingx.label}] 止盈挂单 ${this.legs.bingx.exitSide} ${shortQty} @ ${shortTarget}`
+          );
+        }
+      } catch (error) {
+        const message = extractMessage(error);
+        this.tradeLog.push("error", `止盈挂单失败: ${message}`);
+        this.errorMessage = message;
+        if (exitOrders.grvt) {
+          await this.cancelSpecificOrder(
+            this.legs.grvt,
+            exitOrders.grvt.orderId,
+            "止盈失败回滚 (GRVT)"
+          );
+        }
+        if (exitOrders.bingx) {
+          await this.cancelSpecificOrder(
+            this.legs.bingx,
+            exitOrders.bingx.orderId,
+            "止盈失败回滚 (BingX)"
+          );
+        }
+        this.status = "entry-working";
+        this.emitUpdate();
+        return;
+      }
+
+      if (needsLong && exitOrders.grvt) {
+        this.legs.grvt.exitOrderId = exitOrders.grvt.orderId;
+        this.legs.grvt.exitTargetQty = longQty;
+        this.legs.grvt.exitLimitPrice = longTarget;
+        this.legs.grvt.lastKnownExitStatus = exitOrders.grvt.status ?? "NEW";
+      }
+      if (needsShort && exitOrders.bingx) {
+        this.legs.bingx.exitOrderId = exitOrders.bingx.orderId;
+        this.legs.bingx.exitTargetQty = shortQty;
+        this.legs.bingx.exitLimitPrice = shortTarget;
+        this.legs.bingx.lastKnownExitStatus = exitOrders.bingx.status ?? "NEW";
+      }
+
+      this.errorMessage = null;
+      this.status = "exit-working";
+      if (!this.exitLogged) {
+        this.exitLogged = true;
+        this.tradeLog.push("info", "止盈挂单已就绪，等待成交退出");
+      }
+      this.emitUpdate();
+    } catch (error) {
+      const message = extractMessage(error);
+      this.tradeLog.push("error", `布置止盈失败: ${message}`);
+      this.errorMessage = message;
+      this.status = "entry-working";
+      this.emitUpdate();
+    } finally {
+      this.exitPlacementInFlight = false;
+    }
+  }
+
+  private resolveEntryBasis(): number | null {
+    const longCandidate = this.pickFirstValidNumber([
+      this.legs.grvt.position.entryPrice,
+      this.legs.grvt.entryLimitPrice,
+      this.legs.grvt.topAsk,
+      this.legs.grvt.topBid,
+    ]);
+    const shortCandidate = this.pickFirstValidNumber([
+      this.legs.bingx.position.entryPrice,
+      this.legs.bingx.entryLimitPrice,
+      this.legs.bingx.topBid,
+      this.legs.bingx.topAsk,
+    ]);
+    if (longCandidate != null && shortCandidate != null) {
+      const average = (longCandidate + shortCandidate) / 2;
+      if (Number.isFinite(average) && average > 0) {
+        return average;
+      }
+    }
+    return this.entryAverage;
+  }
+
+  private pickFirstValidNumber(values: Array<number | null | undefined>): number | null {
+    for (const value of values) {
+      const numeric = Number(value);
+      if (Number.isFinite(numeric) && numeric > 0) {
+        return numeric;
+      }
+    }
+    return null;
+  }
+
+  private isExitComplete(): boolean {
     return this.isLegFlat(this.legs.grvt) && this.isLegFlat(this.legs.bingx);
   }
 
-  private isLegFlat(leg: HedgeLegState): boolean {
-    return isNearlyZero(leg.position.positionAmt, POSITION_EPS);
+  private finishCycle(): void {
+    this.resetLegForNextCycle(this.legs.grvt);
+    this.resetLegForNextCycle(this.legs.bingx);
+    this.entryAverage = null;
+    this.exitTargets = { grvt: null, bingx: null };
+
+    if (!this.cycleLogged) {
+      this.cycle += 1;
+      this.cycleLogged = true;
+      this.tradeLog.push("success", `对冲循环 #${this.cycle} 已完成`);
+    }
+
+    if (this.config.autoRestart) {
+      this.status = "waiting-market";
+      this.entryLogged = false;
+      this.exitLogged = false;
+      this.cycleLogged = false;
+      this.emitUpdate();
+      this.evaluate();
+    } else {
+      this.status = "cycle-complete";
+      this.emitUpdate();
+    }
   }
 
-  private getLegExitQuantity(leg: HedgeLegState): number {
-    const absPosition = Math.abs(leg.position.positionAmt);
-    if (absPosition > POSITION_EPS) {
-      return absPosition;
-    }
-    return leg.entryTargetQty;
+  private resetLegForNextCycle(leg: HedgeLegState): void {
+    leg.entryOrderId = undefined;
+    leg.exitOrderId = undefined;
+    leg.entryTargetQty = 0;
+    leg.exitTargetQty = 0;
+    leg.entryLimitPrice = null;
+    leg.exitLimitPrice = null;
+    leg.lastKnownEntryStatus = undefined;
+    leg.lastKnownExitStatus = undefined;
   }
 
   private async cancelAllOrders(leg: HedgeLegState, context: string): Promise<void> {
@@ -697,30 +865,8 @@ export class GrvtBingxHedgeEngine {
     }
   }
 
-  private adjustPrice(price: number, tick: number, direction: "up" | "down"): number {
-    if (!Number.isFinite(price) || price <= 0) return price;
-    if (!Number.isFinite(tick) || tick <= 0) return Number(price.toFixed(6));
-    const decimals = Math.min(12, Math.max(0, decimalsOf(tick)));
-    const ratio = price / tick;
-    let units: number;
-    if (direction === "up") {
-      units = Math.ceil(ratio - 1e-9);
-    } else {
-      units = Math.floor(ratio + 1e-9);
-    }
-    if (!Number.isFinite(units) || units <= 0) {
-      units = 1;
-    }
-    const adjusted = units * tick;
-    return Number(adjusted.toFixed(decimals));
-  }
-
-  private adjustQuantity(qty: number, step: number): number {
-    if (!Number.isFinite(qty) || qty <= 0) return 0;
-    if (!Number.isFinite(step) || step <= 0) return qty;
-    const rounded = roundQtyDownToStep(qty, step);
-    const decimals = Math.min(12, Math.max(0, decimalsOf(step)));
-    return Number(rounded.toFixed(decimals));
+  private isLegFlat(leg: HedgeLegState): boolean {
+    return isNearlyZero(leg.position.positionAmt, POSITION_EPS);
   }
 
   private findOrder(leg: HedgeLegState, orderId: number | string): AsterOrder | undefined {
@@ -731,6 +877,8 @@ export class GrvtBingxHedgeEngine {
     return {
       ready: this.isReady(),
       status: this.status,
+      cycle: this.cycle,
+      autoRestart: Boolean(this.config.autoRestart),
       roiTargetPercent: this.config.exitRoiPercent,
       entryAverage: this.entryAverage,
       exitTargets: { ...this.exitTargets },

@@ -122,6 +122,26 @@ The script installs Bun, project dependencies, collects Aster API credentials, g
 3. The adapter connects to mainnet by default; enable `PARADEX_SANDBOX=true` and adjust `PARADEX_SYMBOL` for testnet usage.
 4. Advanced tuning: use `PARADEX_USE_PRO`, `PARADEX_RECONNECT_DELAY_MS`, or debug flags as needed.
 
+## GRVT-BingX Hedge Mode
+- **Concept**: go long on GRVT and short on BingX with the same size, then arm reduce-only take-profit orders as soon as exposure appears so the spread is captured at a pre-defined ROI (`HEDGE_EXIT_ROI_PERCENT`).
+- **Key environment variables**:
+  - `HEDGE_ORDER_AMOUNT`: hedge size in base units. Start small (for example `0.001`) and scale gradually once funding and leverage are confirmed.
+  - `HEDGE_EXIT_ROI_PERCENT`: ROI target expressed as a percentage. The default `5` translates to +5% on the long leg and -5% on the short leg relative to the blended entry.
+  - `HEDGE_AUTO_RESTART`: automatically re-arm the next hedge cycle after both exit orders fill. Defaults to `true`.
+  - `HEDGE_GRVT_SYMBOL` / `HEDGE_BINGX_SYMBOL`: override the contract symbols per venue when they differ from global defaults (`GRVT_SYMBOL`, `BINGX_SYMBOL`, or `TRADE_SYMBOL`).
+  - Precision overrides (`HEDGE_GRVT_PRICE_TICK`, `HEDGE_GRVT_QTY_STEP`, `HEDGE_BINGX_PRICE_TICK`, `HEDGE_BINGX_QTY_STEP`) should mirror each market’s tick size and lot step.
+- **How to run**:
+  1. Place GRVT and BingX API credentials in `.env`, ensure one-way mode is enabled, and pre-set leverage on both sides.
+  2. Configure the hedge variables listed above.
+  3. Launch via `bun run index.ts` and choose `GRVT-BingX Hedge`, or run silently with `bun run index.ts --strategy grvt-bingx-hedge --silent`.
+  4. The Ink dashboard shows the current cycle, auto-restart flag, blended entry, projected exit prices, and a live event log.
+- **Status reference**:
+  - `waiting-market`: synchronising account, order, and depth feeds on both venues.
+  - `placing-entry` / `entry-working`: posting limit buys on GRVT and limit sells on BingX at the top of book until both legs fill.
+  - `placing-exit`: once exposure is detected, take-profit orders are placed immediately (reduceOnly).
+  - `exit-working`: the hedge is active and waiting for ROI targets to fill. When positions flatten the cycle completes and, if `HEDGE_AUTO_RESTART=true`, the engine re-arms automatically.
+- **Risk suggestions**: keep healthy margin on both exchanges, pre-set leverage manually, and pause the engine if either leg shows a residual position—the strategy will wait for a flat state before entering again.
+
 ## Command Cheatsheet
 ```bash
 bun run index.ts   # Launch the CLI (default entrypoint)

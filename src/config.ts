@@ -145,6 +145,7 @@ export interface HedgeConfig {
   exitRoiPercent: number;
   pollIntervalMs: number;
   maxLogEntries: number;
+  autoRestart: boolean;
   grvtPriceTick: number;
   grvtQtyStep: number;
   bingxPriceTick: number;
@@ -233,6 +234,7 @@ export const hedgeConfig: HedgeConfig = {
   exitRoiPercent: Math.max(0, parseNumber(process.env.HEDGE_EXIT_ROI_PERCENT, 5)),
   pollIntervalMs: Math.max(200, parseNumber(process.env.HEDGE_POLL_INTERVAL_MS, 1000)),
   maxLogEntries: Math.max(50, parseNumber(process.env.HEDGE_MAX_LOG_ENTRIES, 200)),
+  autoRestart: parseBoolean(process.env.HEDGE_AUTO_RESTART, true),
   grvtPriceTick: Math.max(
     1e-9,
     parseNumber(process.env.HEDGE_GRVT_PRICE_TICK ?? process.env.PRICE_TICK, 0.1)
