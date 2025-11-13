@@ -81,25 +81,18 @@ export function GrvtBingxHedgeApp({ onExit }: GrvtBingxHedgeAppProps) {
     );
   }
 
-  const {
-    status,
-    ready,
-    entryAverage,
-    exitTargets,
-    legs,
-    tradeLog,
-    errorMessage,
-  } = snapshot;
+  const { status, ready, entryAverage, exitTargets, legs, tradeLog, errorMessage, cycleCount } = snapshot;
 
   const lastLogs = tradeLog.slice(-6);
 
   return (
     <Box flexDirection="column" paddingX={1} paddingY={0}>
-      <Box flexDirection="column" marginBottom={1}>
+        <Box flexDirection="column" marginBottom={1}>
         <Text color="cyanBright">GRVT-BingX 双腿对冲面板</Text>
         <Text>
           状态: {status} ｜ 数据就绪: {ready ? "是" : "否"} ｜ ROI 目标: {roiTargetText}%
         </Text>
+          <Text>完成轮次: {cycleCount}</Text>
         <Text>
           入场均价: {formatNumber(entryAverage, 2, "-")} ｜ 预设平仓价: GRVT{" "}
           {formatNumber(exitTargets.grvt, 2, "-")} ｜ BingX {formatNumber(exitTargets.bingx, 2, "-")}

@@ -158,6 +158,32 @@ bun run dev        # 调试模式
 bun x vitest run   # 执行全部测试
 ```
 
+## GRVT-BingX 对冲模式（Hedge Mode）
+全新的 GRVT-BingX 对冲引擎默认执行“GRVT 做多 + BingX 做空”小仓位套保，并在每轮入场后立即挂出目标 ROI 的退出单，周而复始循环。使用步骤如下：
+
+1. **配置环境变量**
+   - `HEDGE_GRVT_SYMBOL` / `HEDGE_BINGX_SYMBOL`：两腿对应的永续合约代码，默认分别继承 `GRVT_SYMBOL` 与 `BINGX_SYMBOL`。
+   - `HEDGE_ORDER_AMOUNT`：单腿下单数量（标的资产计），对冲仓位即两腿同量。
+   - `HEDGE_EXIT_ROI_PERCENT`：目标 ROI（百分比），引擎会在入场成交后按此比例计算减仓价。
+   - `HEDGE_GRVT_PRICE_TICK` / `HEDGE_BINGX_PRICE_TICK`、`HEDGE_GRVT_QTY_STEP` / `HEDGE_BINGX_QTY_STEP`：若交易所精度与默认不一致需显式覆盖。
+   - 其余交易所 API 凭证保持与常规策略一致（`GRVT_API_KEY`、`BINGX_API_KEY` 等）。
+
+2. **启动策略**
+   - 进入 Ink CLI，选择 `GRVT-BingX Hedge`；或直接运行
+     ```bash
+     bun run index.ts --strategy grvt-bingx-hedge --silent
+     ```
+   - 面板会显示当前状态、盘口精度、两腿仓位与最近事件日志。
+
+3. **状态机说明**
+   - `waiting-entry`：行情、账户、订单数据同步完毕，等待入场。
+   - `entry-submitted`：两腿限价单挂出，若未成交会自动检测是否需要重新排队。
+   - `exit-submitted`：入场成交后挂出 reduce-only 退出单，一旦持仓归零即重新回到 `waiting-entry` 继续下一轮。
+
+4. **监控与调试**
+   - 面板中的「完成轮次」会累计成功对冲的轮数。
+   - 如需临时停止，可在 CLI 中按 `Esc` 或调用 `engine.stop()`，此时不会强制撤单，需酌情手动清理。
+
 ## 静默启动与后台运行
 ### 直接静默启动
 无需进入 Ink 菜单，可用命令行直接拉起指定策略：
