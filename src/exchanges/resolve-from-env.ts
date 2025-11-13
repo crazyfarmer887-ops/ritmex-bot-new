@@ -139,6 +139,7 @@ function resolveBingxCredentials(symbol: string): BingxCredentials {
     symbol: process.env.BINGX_SYMBOL ?? symbol,
     leverage,
     marginMode: process.env.BINGX_MARGIN_MODE,
+    positionMode: parseBingxPositionMode(process.env.BINGX_POSITION_MODE),
     testnet: parseOptionalBoolean(process.env.BINGX_TESTNET),
   };
   return credentials;
@@ -213,4 +214,13 @@ function parseOptionalNumber(value: string | undefined): number | undefined {
   if (!value) return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function parseBingxPositionMode(value: string | undefined): "ONE_WAY" | "HEDGE" | undefined {
+  if (value == null) return undefined;
+  const normalized = value.toString().trim().toUpperCase().replace(/[-\s]/g, "_");
+  if (!normalized) return undefined;
+  if (normalized === "ONE_WAY" || normalized === "ONEWAY") return "ONE_WAY";
+  if (normalized === "HEDGE" || normalized === "HEDGE_MODE" || normalized === "DUAL") return "HEDGE";
+  return undefined;
 }
