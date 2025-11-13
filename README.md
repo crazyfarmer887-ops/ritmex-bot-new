@@ -107,6 +107,12 @@ curl -fsSL https://github.com/discountry/ritmex-bot/raw/refs/heads/main/setup.sh
 3. 若使用测试网，可将 `GRVT_ENV=testnet` 并调整 `GRVT_INSTRUMENT`/`GRVT_SYMBOL`。
 4. 可选：提供 `GRVT_COOKIE` 或自定义 `GRVT_SIGNER_PATH` 以复用已有登录态。
 
+### BingX
+1. 对冲模式无需将 `EXCHANGE` 切换到 BingX，但必须在 `.env` 中提供 `BINGX_API_KEY` 与 `BINGX_API_SECRET`。
+2. 根据交易对补充 `BINGX_SYMBOL`、`BINGX_LEVERAGE`，必要时设置 `BINGX_MARGIN_MODE`（默认为 `ISOLATED`）或 `BINGX_TESTNET=true` 连接模拟盘。
+3. 持仓模式可通过 `BINGX_POSITION_MODE=ONEWAY`（默认单向）或 `HEDGE` 手动指定，以避免下单失败。
+4. `BINGX_DEBUG=true` 可开启适配器详细日志，帮助排查请求或行情问题。
+
 ### Lighter
 1. 设置 `EXCHANGE=lighter`。
 2. 填写 `LIGHTER_ACCOUNT_INDEX` 与 `LIGHTER_API_PRIVATE_KEY`（40 字节十六进制私钥），其中`LIGHTER_ACCOUNT_INDEX`是你的账户索引，需要你在官网按F12观察接口请求获取，`LIGHTER_API_PRIVATE_KEY`是你的API私钥。
@@ -125,6 +131,25 @@ curl -fsSL https://github.com/discountry/ritmex-bot/raw/refs/heads/main/setup.sh
 3. 默认连接主网，若需测试网，将 `PARADEX_SANDBOX=true` 并根据需要调整 `PARADEX_SYMBOL`。
 4. 复杂环境可额外设置 `PARADEX_USE_PRO`、`PARADEX_RECONNECT_DELAY_MS` 或调试开关。
 
+## GRVT-BingX 对冲模式
+- **策略概览**：GRVT 合约做多 + BingX 合约做空，同步下单形成 delta-neutral 仓位；成交后自动按 `HEDGE_EXIT_ROI_PERCENT` 计算目标 ROI，并在两边同时挂出 reduce-only 平仓单。
+- **准备工作**
+  - 配置 GRVT 凭证：`GRVT_API_KEY` / `GRVT_API_SECRET`（或 `GRVT_COOKIE` + `GRVT_ACCOUNT_ID`）、`GRVT_SUB_ACCOUNT_ID`、`GRVT_INSTRUMENT`、`GRVT_SYMBOL`。
+  - 配置 BingX 凭证：`BINGX_API_KEY`、`BINGX_API_SECRET`，可选 `BINGX_SYMBOL`/`BINGX_LEVERAGE`/`BINGX_MARGIN_MODE`。
+  - 设置对冲参数：  
+    `HEDGE_GRVT_SYMBOL`、`HEDGE_BINGX_SYMBOL`（默认自动回退到各交易所的 `TRADE_SYMBOL`），  
+    `HEDGE_ORDER_AMOUNT`（每条腿下单数量，建议小仓位验证）、  
+    `HEDGE_EXIT_ROI_PERCENT`（目标 ROI%，默认 5）、  
+    精度控制 `HEDGE_GRVT_PRICE_TICK` / `HEDGE_GRVT_QTY_STEP` / `HEDGE_BINGX_PRICE_TICK` / `HEDGE_BINGX_QTY_STEP`。
+- **运行方式**
+  - Ink 菜单：`bun run index.ts` → 选择 `GRVT-BingX Hedge`。
+  - 静默模式：`bun run index.ts --strategy grvt-bingx-hedge --silent`（使用 `.env` 中的参数）。
+  - 首次启动会清空两边历史挂单，等待账户/深度数据同步后，按最新盘口价格下限价单，并在成交后（或立即）挂出 reduce-only 平仓单，策略完成后自动进入 `completed` 状态。
+- **常见调参**
+  - 将 `HEDGE_ORDER_AMOUNT` 调低到 0.001 或更小便于测试。
+  - 根据交易所精度调整 `HEDGE_*_PRICE_TICK` 与 `HEDGE_*_QTY_STEP`；若设置为 0 将触发校验错误。
+  - ROI 目标可在运行中通过重新启动并修改 `.env` 来调整。
+
 ## 命令速查
 ```bash
 bun run index.ts   # 启动 CLI（默认入口）
@@ -140,6 +165,7 @@ bun x vitest run   # 执行全部测试
 bun run index.ts --strategy trend --silent
 bun run index.ts --strategy maker --silent
 bun run index.ts --strategy offset-maker --silent
+bun run index.ts --strategy grvt-bingx-hedge --silent
 ```
 如需同时指定交易所，可叠加 `--exchange/-e` 参数。
 
@@ -149,6 +175,7 @@ bun run index.ts --strategy offset-maker --silent
 bun run start:trend:silent
 bun run start:maker:silent
 bun run start:offset:silent
+bun run start:grvt-bingx-hedge:silent
 ```
 
 ### 使用 pm2 守护并自动重启
@@ -161,6 +188,7 @@ bunx pm2 start bun --name ritmex-trend --cwd . --restart-delay 5000 -- run index
 bun run pm2:start:trend
 bun run pm2:start:maker
 bun run pm2:start:offset
+bun run pm2:start:grvt-bingx-hedge
 ```
 完成配置后可执行 `pm2 save` 持久化进程列表。
 
