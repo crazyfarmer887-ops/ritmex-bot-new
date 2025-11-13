@@ -30,6 +30,33 @@ A Bun-powered multi-exchange perpetuals workstation that ships an SMA30 trend en
 | Backpack | USDC perpetuals | `BACKPACK_API_KEY`, `BACKPACK_API_SECRET`, `BACKPACK_PASSWORD` | Set `BACKPACK_SANDBOX=true` for the sandbox |
 | Paradex | StarkEx perpetuals | `PARADEX_PRIVATE_KEY`, `PARADEX_WALLET_ADDRESS` | Toggle `PARADEX_SANDBOX=true` for the testnet |
 
+## GRVT-BingX Hedge Mode
+The GRVT-BingX hedge engine opens a long leg on `GRVT` and a matching short leg on `BingX`, then immediately posts `reduceOnly` take-profit orders using your target ROI. Once both exits fill, the engine resets its internal state and waits for the next entry opportunity, making it suitable for continuous low-size hedging.
+
+### Required environment variables
+| Variable | Purpose |
+| --- | --- |
+| `GRVT_API_KEY` / `GRVT_API_SECRET` / `GRVT_SUB_ACCOUNT_ID` | GRVT perpetual credentials (use `GRVT_ENV=testnet` for paper trading) |
+| `BINGX_API_KEY` / `BINGX_API_SECRET` | BingX perpetual credentials; defaults to isolated 50x, override with `BINGX_LEVERAGE` / `BINGX_MARGIN_MODE` |
+| `HEDGE_ORDER_AMOUNT` | Position size per leg in base units (falls back to `TRADE_AMOUNT`) |
+| `HEDGE_EXIT_ROI_PERCENT` | ROI target percentage; the engine pushes GRVT exits higher and BingX exits lower accordingly |
+| `HEDGE_GRVT_SYMBOL` / `HEDGE_BINGX_SYMBOL` | Override contract symbols for each venue |
+| `HEDGE_GRVT_PRICE_TICK`, `HEDGE_GRVT_QTY_STEP`, `HEDGE_BINGX_*` | Optional precision overrides; default to `PRICE_TICK` and `QTY_STEP` |
+| `HEDGE_POLL_INTERVAL_MS` | Evaluation cadence in milliseconds (defaults to 1000) |
+
+> Make sure both venues run in one-way position mode and the desired leverage is configured on the exchange before launching the strategy.
+
+### How to launch
+1. Interactive: run `bun run index.ts`, pick “GRVT-BingX Hedge” from the menu, and confirm the prompts (press `Enter` to keep environment defaults).
+2. Silent: `bun run index.ts --strategy grvt-bingx-hedge --silent`.
+
+### Lifecycle
+- On startup the engine cancels stale orders on both venues and waits until account, orders, and depth streams are in sync.
+- When both books are ready and positions are flat, it submits a GRVT long and BingX short at size `HEDGE_ORDER_AMOUNT`, respecting each venue’s tick/step requirements.
+- Exit orders are posted immediately after the entries are accepted, using `reduceOnly` to lock in the configured ROI.
+- When both legs flatten out, the engine logs the result, resets its internal book-keeping, and loops for the next round automatically.
+- Any placement failure (entry or exit) triggers automatic rollbacks, detailed in the trade log and CLI dashboard.
+
 ## Requirements
 - Bun ≥ 1.2 (both `bun` and `bunx` on PATH)
 - macOS, Linux, or Windows via WSL (native Windows works but WSL is recommended)

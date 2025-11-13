@@ -33,6 +33,33 @@
 | Backpack | USDC 永续 | `BACKPACK_API_KEY`, `BACKPACK_API_SECRET`, `BACKPACK_PASSWORD` | `BACKPACK_SANDBOX=true` 启用沙盒
 | Paradex | StarkEx 永续 | `PARADEX_PRIVATE_KEY`, `PARADEX_WALLET_ADDRESS` | `PARADEX_SANDBOX=true` 使用测试网
 
+## GRVT-BingX 对冲模式
+GRVT-BingX 对冲引擎会同时在 `GRVT` 合约上做多、在 `BingX` 合约上做空，并在入场后立刻按照目标 ROI 预挂 `reduceOnly` 减仓单。两腿仓位完全平掉后会自动清理内部状态，继续等待下一轮入场机会，适合以小仓位做持续对冲。
+
+### 必要环境变量
+| 变量 | 说明 |
+| --- | --- |
+| `GRVT_API_KEY` / `GRVT_API_SECRET` / `GRVT_SUB_ACCOUNT_ID` | GRVT 永续交易凭证（可搭配 `GRVT_ENV=testnet` 验证） |
+| `BINGX_API_KEY` / `BINGX_API_SECRET` | BingX 永续交易凭证，默认使用逐仓 50 倍，可通过 `BINGX_LEVERAGE`、`BINGX_MARGIN_MODE` 覆盖 |
+| `HEDGE_ORDER_AMOUNT` | 每条腿的下单数量（基于标的资产，默认为 `TRADE_AMOUNT`） |
+| `HEDGE_EXIT_ROI_PERCENT` | 目标 ROI%，引擎会针对 GRVT 上调目标价、BingX 下调目标价 |
+| `HEDGE_GRVT_SYMBOL` / `HEDGE_BINGX_SYMBOL` | 自定义两腿使用的合约代码（默认读取各交易所 `SYMBOL`） |
+| `HEDGE_GRVT_PRICE_TICK` / `HEDGE_GRVT_QTY_STEP` / `HEDGE_BINGX_*` | 可精调价格与数量精度，默认回落到 `PRICE_TICK` 与 `QTY_STEP` |
+| `HEDGE_POLL_INTERVAL_MS` | 策略评估周期（毫秒，默认 1000） |
+
+> 运行前请确保两个交易所在同一账户下均处于单向持仓模式，并已手动设置合适的杠杆。
+
+### 启动方式
+1. 交互模式：执行 `bun run index.ts`，在菜单里选择 “GRVT-BingX 对冲模式”。首次启动会询问合约代码、下单数量与 ROI，可直接按回车保留环境变量默认值。
+2. 静默模式：`bun run index.ts --strategy grvt-bingx-hedge --silent`。
+
+### 运行流程
+- 启动时清理两腿遗留挂单，等待行情与账户数据同步。
+- 当盘口就绪且仓位为零时，同时提交 GRVT 多单与 BingX 空单，数量使用 `HEDGE_ORDER_AMOUNT`，报价自动贴合盘口精度。
+- 入场订单接受后立即预挂 ROI 减仓单（`reduceOnly`），确保在目标价到达前订单已生效。
+- 仓位全部归零后写入日志并重置状态，持续循环下一轮。
+- 如任一腿下单失败或退出挂单被拒绝，引擎会自动撤单并重试，失败原因会记录在日志与 UI 面板上。
+
 ## 系统要求
 - Bun ≥ 1.2（需同时包含 `bun`、`bunx` 命令）
 - macOS、Linux 或 Windows (推荐 WSL)
