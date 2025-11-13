@@ -5,6 +5,7 @@ import { LighterExchangeAdapter, type LighterCredentials } from "./lighter/adapt
 import { BackpackExchangeAdapter, type BackpackCredentials } from "./backpack/adapter";
 import { ParadexExchangeAdapter, type ParadexCredentials } from "./paradex/adapter";
 import { BingxExchangeAdapter, type BingxCredentials } from "./bingx/adapter";
+import { sanitizeEnvValue } from "../utils/env";
 
 export interface ExchangeFactoryOptions {
   symbol: string;
@@ -20,10 +21,10 @@ export interface ExchangeFactoryOptions {
 export type SupportedExchangeId = "aster" | "grvt" | "lighter" | "backpack" | "paradex" | "bingx";
 
 export function resolveExchangeId(value?: string | null): SupportedExchangeId {
-  const fallback = (value ?? process.env.EXCHANGE ?? process.env.TRADE_EXCHANGE ?? "aster")
-    .toString()
-    .trim()
-    .toLowerCase();
+  const explicit = typeof value === "string" ? sanitizeEnvValue(value) : undefined;
+  const envPrimary = sanitizeEnvValue(process.env.EXCHANGE);
+  const envSecondary = sanitizeEnvValue(process.env.TRADE_EXCHANGE);
+  const fallback = (explicit ?? envPrimary ?? envSecondary ?? "aster").toLowerCase();
   if (fallback === "grvt") return "grvt";
   if (fallback === "lighter") return "lighter";
   if (fallback === "backpack") return "backpack";

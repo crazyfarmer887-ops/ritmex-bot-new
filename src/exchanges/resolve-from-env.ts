@@ -6,6 +6,7 @@ import type { BackpackCredentials } from "./backpack/adapter";
 import type { ParadexCredentials } from "./paradex/adapter";
 import type { BingxCredentials } from "./bingx/adapter";
 import type { GrvtCredentials } from "./grvt/adapter";
+import { sanitizeEnvValue, getSanitizedEnv } from "../utils/env";
 
 interface BuildAdapterOptions {
   symbol: string;
@@ -50,8 +51,8 @@ export function buildAdapterFromEnv(options: BuildAdapterOptions): ExchangeAdapt
 }
 
 function resolveAsterCredentials(): AsterCredentials {
-  const apiKey = process.env.ASTER_API_KEY;
-  const apiSecret = process.env.ASTER_API_SECRET;
+  const apiKey = getSanitizedEnv("ASTER_API_KEY");
+  const apiSecret = getSanitizedEnv("ASTER_API_SECRET");
   if (!apiKey || !apiSecret) {
     throw new Error("缺少 ASTER_API_KEY 或 ASTER_API_SECRET 环境变量");
   }
@@ -59,8 +60,8 @@ function resolveAsterCredentials(): AsterCredentials {
 }
 
 function resolveLighterCredentials(symbol: string): LighterCredentials {
-  const accountIndexRaw = process.env.LIGHTER_ACCOUNT_INDEX;
-  const apiPrivateKey = process.env.LIGHTER_API_PRIVATE_KEY;
+  const accountIndexRaw = getSanitizedEnv("LIGHTER_ACCOUNT_INDEX");
+  const apiPrivateKey = getSanitizedEnv("LIGHTER_API_PRIVATE_KEY");
   if (!accountIndexRaw || !apiPrivateKey) {
     throw new Error("缺少 LIGHTER_ACCOUNT_INDEX 或 LIGHTER_API_PRIVATE_KEY 环境变量");
   }
@@ -68,42 +69,46 @@ function resolveLighterCredentials(symbol: string): LighterCredentials {
   if (!Number.isInteger(accountIndex)) {
     throw new Error("LIGHTER_ACCOUNT_INDEX 必须是整数");
   }
+  const apiKeyIndexRaw = getSanitizedEnv("LIGHTER_API_KEY_INDEX");
+  const marketIdRaw = getSanitizedEnv("LIGHTER_MARKET_ID");
+  const priceDecimalsRaw = getSanitizedEnv("LIGHTER_PRICE_DECIMALS");
+  const sizeDecimalsRaw = getSanitizedEnv("LIGHTER_SIZE_DECIMALS");
   const credentials: LighterCredentials = {
     displaySymbol: symbol,
     accountIndex,
     apiPrivateKey,
-    apiKeyIndex: process.env.LIGHTER_API_KEY_INDEX ? Number(process.env.LIGHTER_API_KEY_INDEX) : 0,
-    environment: process.env.LIGHTER_ENV,
-    baseUrl: process.env.LIGHTER_BASE_URL,
-    l1Address: process.env.LIGHTER_L1_ADDRESS,
-    marketSymbol: process.env.LIGHTER_SYMBOL,
-    marketId: process.env.LIGHTER_MARKET_ID ? Number(process.env.LIGHTER_MARKET_ID) : undefined,
-    priceDecimals: process.env.LIGHTER_PRICE_DECIMALS ? Number(process.env.LIGHTER_PRICE_DECIMALS) : undefined,
-    sizeDecimals: process.env.LIGHTER_SIZE_DECIMALS ? Number(process.env.LIGHTER_SIZE_DECIMALS) : undefined,
+    apiKeyIndex: apiKeyIndexRaw ? Number(apiKeyIndexRaw) : 0,
+    environment: getSanitizedEnv("LIGHTER_ENV"),
+    baseUrl: getSanitizedEnv("LIGHTER_BASE_URL"),
+    l1Address: getSanitizedEnv("LIGHTER_L1_ADDRESS"),
+    marketSymbol: getSanitizedEnv("LIGHTER_SYMBOL"),
+    marketId: marketIdRaw ? Number(marketIdRaw) : undefined,
+    priceDecimals: priceDecimalsRaw ? Number(priceDecimalsRaw) : undefined,
+    sizeDecimals: sizeDecimalsRaw ? Number(sizeDecimalsRaw) : undefined,
   };
   return credentials;
 }
 
 function resolveBackpackCredentials(symbol: string): BackpackCredentials {
-  const apiKey = process.env.BACKPACK_API_KEY;
-  const apiSecret = process.env.BACKPACK_API_SECRET;
+  const apiKey = getSanitizedEnv("BACKPACK_API_KEY");
+  const apiSecret = getSanitizedEnv("BACKPACK_API_SECRET");
   if (!apiKey || !apiSecret) {
     throw new Error("缺少 BACKPACK_API_KEY 或 BACKPACK_API_SECRET 环境变量");
   }
   const credentials: BackpackCredentials = {
     apiKey,
     apiSecret,
-    password: process.env.BACKPACK_PASSWORD,
-    subaccount: process.env.BACKPACK_SUBACCOUNT,
-    symbol: process.env.BACKPACK_SYMBOL ?? symbol,
-    sandbox: parseOptionalBoolean(process.env.BACKPACK_SANDBOX),
+    password: getSanitizedEnv("BACKPACK_PASSWORD"),
+    subaccount: getSanitizedEnv("BACKPACK_SUBACCOUNT"),
+    symbol: getSanitizedEnv("BACKPACK_SYMBOL") ?? symbol,
+    sandbox: parseOptionalBoolean(getSanitizedEnv("BACKPACK_SANDBOX")),
   };
   return credentials;
 }
 
 function resolveParadexCredentials(): ParadexCredentials {
-  const privateKey = process.env.PARADEX_PRIVATE_KEY;
-  const walletAddress = process.env.PARADEX_WALLET_ADDRESS;
+  const privateKey = getSanitizedEnv("PARADEX_PRIVATE_KEY");
+  const walletAddress = getSanitizedEnv("PARADEX_WALLET_ADDRESS");
 
   if (!privateKey || !walletAddress) {
     throw new Error("Paradex 需要配置 PARADEX_PRIVATE_KEY 与 PARADEX_WALLET_ADDRESS");
@@ -118,40 +123,40 @@ function resolveParadexCredentials(): ParadexCredentials {
   const credentials: ParadexCredentials = {
     privateKey,
     walletAddress,
-    sandbox: parseOptionalBoolean(process.env.PARADEX_SANDBOX),
-    usePro: parseOptionalBoolean(process.env.PARADEX_USE_PRO),
-    watchReconnectDelayMs: parseOptionalNumber(process.env.PARADEX_RECONNECT_DELAY_MS),
+    sandbox: parseOptionalBoolean(getSanitizedEnv("PARADEX_SANDBOX")),
+    usePro: parseOptionalBoolean(getSanitizedEnv("PARADEX_USE_PRO")),
+    watchReconnectDelayMs: parseOptionalNumber(getSanitizedEnv("PARADEX_RECONNECT_DELAY_MS")),
   };
 
   return credentials;
 }
 
 function resolveBingxCredentials(symbol: string): BingxCredentials {
-  const apiKey = process.env.BINGX_API_KEY;
-  const apiSecret = process.env.BINGX_API_SECRET;
+  const apiKey = getSanitizedEnv("BINGX_API_KEY");
+  const apiSecret = getSanitizedEnv("BINGX_API_SECRET");
   if (!apiKey || !apiSecret) {
     throw new Error("BingX 需要配置 BINGX_API_KEY 与 BINGX_API_SECRET 环境变量");
   }
-  const leverage = parseOptionalNumber(process.env.BINGX_LEVERAGE) ?? 50;
+  const leverage = parseOptionalNumber(getSanitizedEnv("BINGX_LEVERAGE")) ?? 50;
   const credentials: BingxCredentials = {
     apiKey,
     apiSecret,
-    symbol: process.env.BINGX_SYMBOL ?? symbol,
+    symbol: getSanitizedEnv("BINGX_SYMBOL") ?? symbol,
     leverage,
-    marginMode: process.env.BINGX_MARGIN_MODE,
-    testnet: parseOptionalBoolean(process.env.BINGX_TESTNET),
+    marginMode: getSanitizedEnv("BINGX_MARGIN_MODE"),
+    testnet: parseOptionalBoolean(getSanitizedEnv("BINGX_TESTNET")),
   };
   return credentials;
 }
 
 function resolveGrvtCredentials(symbol: string): GrvtCredentials {
-  const apiKey = process.env.GRVT_API_KEY;
-  const apiSecret = process.env.GRVT_API_SECRET;
-  const cookie = process.env.GRVT_COOKIE;
-  const accountId = process.env.GRVT_ACCOUNT_ID;
-  const subAccountId = process.env.GRVT_SUB_ACCOUNT_ID;
-  const instrument = process.env.GRVT_INSTRUMENT;
-  const signerPath = process.env.GRVT_SIGNER_PATH;
+  const apiKey = getSanitizedEnv("GRVT_API_KEY");
+  const apiSecret = getSanitizedEnv("GRVT_API_SECRET");
+  const cookie = getSanitizedEnv("GRVT_COOKIE");
+  const accountId = getSanitizedEnv("GRVT_ACCOUNT_ID");
+  const subAccountId = getSanitizedEnv("GRVT_SUB_ACCOUNT_ID");
+  const instrument = getSanitizedEnv("GRVT_INSTRUMENT");
+  const signerPath = getSanitizedEnv("GRVT_SIGNER_PATH");
 
   // Validate authentication method
   if (!cookie || !accountId) {
@@ -186,8 +191,8 @@ function resolveGrvtCredentials(symbol: string): GrvtCredentials {
     accountId,
     subAccountId,
     instrument,
-    symbol: process.env.GRVT_SYMBOL ?? symbol,
-    env: process.env.GRVT_ENV as GrvtCredentials["env"],
+    symbol: getSanitizedEnv("GRVT_SYMBOL") ?? sanitizeEnvValue(symbol) ?? symbol,
+    env: getSanitizedEnv("GRVT_ENV") as GrvtCredentials["env"],
   };
 
   return credentials;
@@ -202,15 +207,17 @@ function isHexAddress(value: string): boolean {
 }
 
 function parseOptionalBoolean(value: string | undefined): boolean | undefined {
-  if (value == null) return undefined;
-  const normalized = value.trim().toLowerCase();
+  const cleaned = sanitizeEnvValue(value);
+  if (!cleaned) return undefined;
+  const normalized = cleaned.toLowerCase();
   if (!normalized) return undefined;
   if (["false", "0", "no", "off"].includes(normalized)) return false;
   return true;
 }
 
 function parseOptionalNumber(value: string | undefined): number | undefined {
-  if (!value) return undefined;
-  const parsed = Number(value);
+  const cleaned = sanitizeEnvValue(value);
+  if (!cleaned) return undefined;
+  const parsed = Number(cleaned);
   return Number.isFinite(parsed) ? parsed : undefined;
 }

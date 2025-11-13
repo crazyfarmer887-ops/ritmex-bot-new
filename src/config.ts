@@ -1,9 +1,10 @@
 /**
  * Trading Configuration
- * 
+ *
  */
 
 import { resolveExchangeId, type SupportedExchangeId } from "./exchanges/create-adapter";
+import { sanitizeEnvValue, getSanitizedEnv } from "./utils/env";
 
 export interface TradingConfig {
   symbol: string;
@@ -39,23 +40,25 @@ export function resolveSymbolFromEnv(explicitExchangeId?: SupportedExchangeId | 
     : resolveExchangeId();
   const { envKeys, fallback } = SYMBOL_PRIORITY_BY_EXCHANGE[exchangeId];
   for (const key of envKeys) {
-    const value = process.env[key];
-    if (value && value.trim()) {
-      return value.trim();
+    const value = getSanitizedEnv(key);
+    if (value) {
+      return value;
     }
   }
   return fallback;
 }
 
 function parseNumber(value: string | undefined, fallback: number): number {
-  if (!value) return fallback;
-  const next = Number(value);
+  const cleaned = sanitizeEnvValue(value);
+  if (!cleaned) return fallback;
+  const next = Number(cleaned);
   return Number.isFinite(next) ? next : fallback;
 }
 
 function parseBoolean(value: string | undefined, fallback: boolean): boolean {
-  if (!value) return fallback;
-  const normalized = value.trim().toLowerCase();
+  const cleaned = sanitizeEnvValue(value);
+  if (!cleaned) return fallback;
+  const normalized = cleaned.toLowerCase();
   if (!normalized) return fallback;
   if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") return true;
   if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") return false;
@@ -72,7 +75,7 @@ export const tradingConfig: TradingConfig = {
   profitLockOffsetUsd: parseNumber(process.env.PROFIT_LOCK_OFFSET_USD, 0.05),
   pollIntervalMs: parseNumber(process.env.POLL_INTERVAL_MS, 500),
   maxLogEntries: parseNumber(process.env.MAX_LOG_ENTRIES, 200),
-  klineInterval: process.env.KLINE_INTERVAL ?? "1m",
+  klineInterval: sanitizeEnvValue(process.env.KLINE_INTERVAL) ?? "1m",
   maxCloseSlippagePct: parseNumber(process.env.MAX_CLOSE_SLIPPAGE_PCT, 0.05),
   priceTick: parseNumber(process.env.PRICE_TICK, 0.1),
   qtyStep: parseNumber(process.env.QTY_STEP, 0.001),
@@ -153,9 +156,9 @@ export interface HedgeConfig {
 
 const resolveBasisSymbol = (envKeys: string[], fallback: string): string => {
   for (const key of envKeys) {
-    const value = process.env[key];
-    if (value && value.trim()) {
-      return value.trim().toUpperCase();
+    const value = getSanitizedEnv(key);
+    if (value) {
+      return value.toUpperCase();
     }
   }
   return fallback.toUpperCase();
@@ -177,8 +180,9 @@ export const basisConfig: BasisArbConfig = {
 };
 
 const resolveGridDirection = (raw: string | undefined, fallback: GridDirection): GridDirection => {
-  if (!raw) return fallback;
-  const normalized = raw.trim().toLowerCase();
+  const cleaned = sanitizeEnvValue(raw);
+  if (!cleaned) return fallback;
+  const normalized = cleaned.toLowerCase();
   if (normalized === "long" || normalized === "long-only") return "long";
   if (normalized === "short" || normalized === "short-only") return "short";
   if (normalized === "both" || normalized === "dual" || normalized === "bi" || normalized === "two-way") return "both";
@@ -221,10 +225,10 @@ gridConfig.maxPositionSize = resolveGridMaxPosition(gridConfig.orderSize, gridCo
 
 export const hedgeConfig: HedgeConfig = {
   grvtSymbol:
-    (process.env.HEDGE_GRVT_SYMBOL && process.env.HEDGE_GRVT_SYMBOL.trim()) ||
+    sanitizeEnvValue(process.env.HEDGE_GRVT_SYMBOL) ||
     resolveSymbolFromEnv("grvt"),
   bingxSymbol:
-    (process.env.HEDGE_BINGX_SYMBOL && process.env.HEDGE_BINGX_SYMBOL.trim()) ||
+    sanitizeEnvValue(process.env.HEDGE_BINGX_SYMBOL) ||
     resolveSymbolFromEnv("bingx"),
   orderAmount: Math.max(
     0,
@@ -252,8 +256,8 @@ export const hedgeConfig: HedgeConfig = {
 };
 
 export function isBasisStrategyEnabled(): boolean {
-  const raw = process.env.ENABLE_BASIS_STRATEGY;
+  const raw = sanitizeEnvValue(process.env.ENABLE_BASIS_STRATEGY);
   if (!raw) return false;
-  const normalized = raw.trim().toLowerCase();
+  const normalized = raw.toLowerCase();
   return normalized === "1" || normalized === "true" || normalized === "yes";
 }
