@@ -21,6 +21,7 @@ import {
 } from "../strategy/grvt-bingx-hedge-engine";
 import { extractMessage } from "../utils/errors";
 import type { StrategyId } from "./args";
+import { resolveHedgeRuntimeConfig } from "./hedge-runtime-config";
 
 interface RunnerOptions {
   silent?: boolean;
@@ -117,7 +118,7 @@ const STRATEGY_FACTORIES: Record<StrategyId, StrategyRunner> = {
       onUpdate: (emitter) => engine.on("update", emitter),
       offUpdate: (emitter) => engine.off("update", emitter),
     });
-  },
+    },
     grid: async (opts) => {
       const config = gridConfig;
       const adapter = createAdapterOrThrow(config.symbol);
@@ -132,18 +133,19 @@ const STRATEGY_FACTORIES: Record<StrategyId, StrategyRunner> = {
       });
     },
     "grvt-bingx-hedge": async (opts) => {
+      const config = await resolveHedgeRuntimeConfig(hedgeConfig, { silent: opts.silent });
       const grvtAdapter = buildAdapterFromEnv({
         exchangeId: "grvt",
-        symbol: hedgeConfig.grvtSymbol,
+        symbol: config.grvtSymbol,
       });
       const bingxAdapter = buildAdapterFromEnv({
         exchangeId: "bingx",
-        symbol: hedgeConfig.bingxSymbol,
+        symbol: config.bingxSymbol,
       });
       if (!grvtAdapter || !bingxAdapter) {
         throw new Error("无法创建交易所适配器，请检查环境变量配置");
       }
-      const engine = new GrvtBingxHedgeEngine(hedgeConfig, { grvtAdapter, bingxAdapter });
+      const engine = new GrvtBingxHedgeEngine(config, { grvtAdapter, bingxAdapter });
       await runEngine({
         engine,
         strategy: "grvt-bingx-hedge",

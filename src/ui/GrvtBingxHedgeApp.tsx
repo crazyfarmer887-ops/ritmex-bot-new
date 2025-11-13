@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useInput } from "ink";
-import { hedgeConfig } from "../config";
+import { hedgeConfig, type HedgeConfig } from "../config";
 import { buildAdapterFromEnv } from "../exchanges/resolve-from-env";
 import {
   GrvtBingxHedgeEngine,
   type GrvtBingxHedgeSnapshot,
 } from "../strategy/grvt-bingx-hedge-engine";
 import { formatNumber } from "../utils/format";
+import { isValidOrderAmount, isValidRoiPercent, parseNumericInput } from "../strategy/hedge-config-utils";
 
 interface GrvtBingxHedgeAppProps {
   onExit: () => void;
@@ -18,9 +19,82 @@ export function GrvtBingxHedgeApp({ onExit }: GrvtBingxHedgeAppProps) {
   const [snapshot, setSnapshot] = useState<GrvtBingxHedgeSnapshot | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const engineRef = useRef<GrvtBingxHedgeEngine | null>(null);
+  const [runtimeConfig, setRuntimeConfig] = useState<HedgeConfig | null>(null);
+  const [promptStage, setPromptStage] = useState<"order" | "roi">("order");
+  const [inputBuffer, setInputBuffer] = useState<string>("");
+  const [promptError, setPromptError] = useState<string | null>(null);
+  const [orderAmount, setOrderAmount] = useState<number>(hedgeConfig.orderAmount);
+  const [exitRoiPercent, setExitRoiPercent] = useState<number>(hedgeConfig.exitRoiPercent);
 
   useInput(
-    (_input, key) => {
+    (input, key) => {
+      if (!runtimeConfig) {
+        if (key.escape || (key.ctrl && input === "c")) {
+          onExit();
+          return;
+        }
+
+        if (key.return) {
+          const fallback = promptStage === "order" ? orderAmount : exitRoiPercent;
+          const parsed = parseNumericInput(inputBuffer, fallback);
+
+          if (parsed == null) {
+            setPromptError("请输入有效数字。");
+            return;
+          }
+
+          if (promptStage === "order") {
+            if (!isValidOrderAmount(parsed)) {
+              setPromptError("仓位数量必须大于 0。");
+              return;
+            }
+            setOrderAmount(parsed);
+            setPromptStage("roi");
+            setInputBuffer("");
+            setPromptError(null);
+            return;
+          }
+
+          if (!isValidRoiPercent(parsed)) {
+            setPromptError("ROI 百分比必须大于等于 0。");
+            return;
+          }
+
+          setExitRoiPercent(parsed);
+          setPromptError(null);
+          setRuntimeConfig({
+            ...hedgeConfig,
+            orderAmount,
+            exitRoiPercent: parsed,
+          });
+          setInputBuffer("");
+          return;
+        }
+
+        if (key.backspace || key.delete) {
+          if (inputBuffer.length > 0) {
+            setInputBuffer((prev) => prev.slice(0, -1));
+          }
+          if (promptError) {
+            setPromptError(null);
+          }
+          return;
+        }
+
+        if (input && input.length === 1) {
+          if (input === "." && inputBuffer.includes(".")) {
+            return;
+          }
+          if (/[0-9.]/.test(input)) {
+            setInputBuffer((prev) => prev + input);
+            if (promptError) {
+              setPromptError(null);
+            }
+          }
+        }
+        return;
+      }
+
       if (key.escape) {
         engineRef.current?.stop();
         onExit();
@@ -30,19 +104,22 @@ export function GrvtBingxHedgeApp({ onExit }: GrvtBingxHedgeAppProps) {
   );
 
   useEffect(() => {
+    if (!runtimeConfig) return;
+    setError(null);
+    setSnapshot(null);
     try {
       const grvtAdapter = buildAdapterFromEnv({
         exchangeId: "grvt",
-        symbol: hedgeConfig.grvtSymbol,
+        symbol: runtimeConfig.grvtSymbol,
       });
       const bingxAdapter = buildAdapterFromEnv({
         exchangeId: "bingx",
-        symbol: hedgeConfig.bingxSymbol,
+        symbol: runtimeConfig.bingxSymbol,
       });
       if (!grvtAdapter || !bingxAdapter) {
         throw new Error("无法创建交易所适配器，请检查环境变量配置");
       }
-      const engine = new GrvtBingxHedgeEngine(hedgeConfig, { grvtAdapter, bingxAdapter });
+      const engine = new GrvtBingxHedgeEngine(runtimeConfig, { grvtAdapter, bingxAdapter });
       engineRef.current = engine;
       setSnapshot(engine.getSnapshot());
       const handler = (next: GrvtBingxHedgeSnapshot) => {
@@ -57,12 +134,41 @@ export function GrvtBingxHedgeApp({ onExit }: GrvtBingxHedgeAppProps) {
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)));
     }
-  }, []);
+  }, [runtimeConfig]);
 
   const roiTargetText = useMemo(() => {
-    const value = snapshot?.roiTargetPercent ?? hedgeConfig.exitRoiPercent;
+    const configValue = runtimeConfig?.exitRoiPercent ?? hedgeConfig.exitRoiPercent;
+    const value = snapshot?.roiTargetPercent ?? configValue;
     return formatNumber(value, 2, "-");
-  }, [snapshot]);
+  }, [snapshot, runtimeConfig]);
+
+  if (!runtimeConfig) {
+    const isOrderStage = promptStage === "order";
+    const defaultValue = isOrderStage ? orderAmount : exitRoiPercent;
+    const defaultFormatted = isOrderStage
+      ? formatNumber(defaultValue, 4, "-")
+      : formatNumber(defaultValue, 2, "-");
+    const defaultValid = isOrderStage
+      ? isValidOrderAmount(defaultValue)
+      : isValidRoiPercent(defaultValue);
+
+    return (
+      <Box flexDirection="column" padding={1}>
+        <Text color="cyanBright">GRVT-BingX 对冲模式</Text>
+        <Text>
+          {isOrderStage
+            ? `请输入对冲单腿仓位数量 (默认 ${defaultFormatted})`
+            : `请输入退出 ROI 百分比 (默认 ${defaultFormatted}%)`}
+        </Text>
+        <Text color="gray">按回车确认，留空使用默认值，Esc/Ctrl+C 返回策略选择。</Text>
+        {!defaultValid ? <Text color="yellow">当前默认值无效，请输入新的数值。</Text> : null}
+        {promptError ? <Text color="red">{promptError}</Text> : null}
+        <Box marginTop={1}>
+          <Text>当前输入: {inputBuffer || "<默认>"}</Text>
+        </Box>
+      </Box>
+    );
+  }
 
   if (error) {
     return (
@@ -81,15 +187,7 @@ export function GrvtBingxHedgeApp({ onExit }: GrvtBingxHedgeAppProps) {
     );
   }
 
-  const {
-    status,
-    ready,
-    entryAverage,
-    exitTargets,
-    legs,
-    tradeLog,
-    errorMessage,
-  } = snapshot;
+  const { status, ready, entryAverage, exitTargets, legs, tradeLog, errorMessage } = snapshot;
 
   const lastLogs = tradeLog.slice(-6);
 
@@ -105,7 +203,7 @@ export function GrvtBingxHedgeApp({ onExit }: GrvtBingxHedgeAppProps) {
           {formatNumber(exitTargets.grvt, 2, "-")} ｜ BingX {formatNumber(exitTargets.bingx, 2, "-")}
         </Text>
         <Text color="gray">
-          仓位规模: {formatNumber(hedgeConfig.orderAmount, 4)} ｜ Esc 返回策略选择
+          仓位规模: {formatNumber(runtimeConfig.orderAmount, 4)} ｜ Esc 返回策略选择
         </Text>
         {errorMessage ? <Text color="red">引擎提示: {errorMessage}</Text> : null}
       </Box>
