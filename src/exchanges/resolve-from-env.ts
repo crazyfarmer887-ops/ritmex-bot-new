@@ -5,6 +5,7 @@ import type { LighterCredentials } from "./lighter/adapter";
 import type { BackpackCredentials } from "./backpack/adapter";
 import type { ParadexCredentials } from "./paradex/adapter";
 import type { BingxCredentials } from "./bingx/adapter";
+import type { GrvtCredentials } from "./grvt/adapter";
 
 interface BuildAdapterOptions {
   symbol: string;
@@ -38,6 +39,11 @@ export function buildAdapterFromEnv(options: BuildAdapterOptions): ExchangeAdapt
   if (id === "bingx") {
     const credentials = resolveBingxCredentials(symbol);
     return createExchangeAdapter({ exchange: id, symbol, bingx: credentials });
+  }
+
+  if (id === "grvt") {
+    const credentials = resolveGrvtCredentials(symbol);
+    return createExchangeAdapter({ exchange: id, symbol, grvt: credentials });
   }
 
   return createExchangeAdapter({ exchange: id, symbol, grvt: { symbol } });
@@ -134,6 +140,20 @@ function resolveBingxCredentials(symbol: string): BingxCredentials {
     leverage,
     marginMode: process.env.BINGX_MARGIN_MODE,
     testnet: parseOptionalBoolean(process.env.BINGX_TESTNET),
+  };
+  return credentials;
+}
+
+function resolveGrvtCredentials(symbol: string): GrvtCredentials {
+  const credentials: GrvtCredentials = {
+    apiKey: process.env.GRVT_API_KEY,
+    apiSecret: process.env.GRVT_API_SECRET,
+    cookie: process.env.GRVT_COOKIE,
+    accountId: process.env.GRVT_ACCOUNT_ID,
+    subAccountId: process.env.GRVT_SUB_ACCOUNT_ID,
+    instrument: process.env.GRVT_INSTRUMENT,
+    symbol: process.env.GRVT_SYMBOL ?? symbol,
+    env: process.env.GRVT_ENV as GrvtCredentials["env"],
   };
   return credentials;
 }
