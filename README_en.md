@@ -104,6 +104,12 @@ The script installs Bun, project dependencies, collects Aster API credentials, g
 3. Use `GRVT_ENV=testnet` when targeting the test environment, and align `GRVT_INSTRUMENT` / `GRVT_SYMBOL`.
 4. Optional: provide `GRVT_COOKIE` or a custom `GRVT_SIGNER_PATH` when reusing an existing session.
 
+### BingX
+1. You do not need to switch `EXCHANGE` to BingX for the hedge mode, but you must supply `BINGX_API_KEY` and `BINGX_API_SECRET` in `.env`.
+2. Adjust `BINGX_SYMBOL` and `BINGX_LEVERAGE` to match the contract; optionally set `BINGX_MARGIN_MODE` (defaults to `ISOLATED`) or `BINGX_TESTNET=true` for the demo board.
+3. Force the desired position mode with `BINGX_POSITION_MODE=ONEWAY` (default) or `HEDGE` to prevent order rejections.
+4. Enable `BINGX_DEBUG=true` for verbose adapter logging when debugging requests or market feeds.
+
 ### Lighter
 1. Set `EXCHANGE=lighter`.
 2. Provide `LIGHTER_ACCOUNT_INDEX` and `LIGHTER_API_PRIVATE_KEY` (40-byte hex private key).
@@ -122,12 +128,32 @@ The script installs Bun, project dependencies, collects Aster API credentials, g
 3. The adapter connects to mainnet by default; enable `PARADEX_SANDBOX=true` and adjust `PARADEX_SYMBOL` for testnet usage.
 4. Advanced tuning: use `PARADEX_USE_PRO`, `PARADEX_RECONNECT_DELAY_MS`, or debug flags as needed.
 
+## GRVT-BingX Hedge Mode
+- **Overview**: Goes long on GRVT while shorting BingX with the same notional, forming a small delta-neutral hedge. Once the entries are submitted the engine derives a target from `HEDGE_EXIT_ROI_PERCENT` and posts paired reduce-only exits on both venues.
+- **Prerequisites**
+  - GRVT credentials: `GRVT_API_KEY` / `GRVT_API_SECRET` (or `GRVT_COOKIE` + `GRVT_ACCOUNT_ID`), `GRVT_SUB_ACCOUNT_ID`, `GRVT_INSTRUMENT`, `GRVT_SYMBOL`.
+  - BingX credentials: `BINGX_API_KEY`, `BINGX_API_SECRET`, plus optional `BINGX_SYMBOL`, `BINGX_LEVERAGE`, `BINGX_MARGIN_MODE`.
+  - Hedge parameters:  
+    `HEDGE_GRVT_SYMBOL`, `HEDGE_BINGX_SYMBOL` (fallback to each venue’s `TRADE_SYMBOL`),  
+    `HEDGE_ORDER_AMOUNT` (per-leg quantity; keep it small in production),  
+    `HEDGE_EXIT_ROI_PERCENT` (target ROI %, default 5),  
+    precision overrides `HEDGE_GRVT_PRICE_TICK` / `HEDGE_GRVT_QTY_STEP` / `HEDGE_BINGX_PRICE_TICK` / `HEDGE_BINGX_QTY_STEP`.
+- **How to run**
+  - Ink UI: `bun run index.ts` → pick `GRVT-BingX Hedge`.
+  - Silent mode: `bun run index.ts --strategy grvt-bingx-hedge --silent` (no prompts; uses `.env`).
+  - Startup flow: clear stale orders on both venues, wait for account/order/depth feeds, place limit entries near top-of-book, and submit reduce-only exits once the hedge is live. When both exits fill the engine reports `completed`.
+- **Tuning tips**
+  - Set `HEDGE_ORDER_AMOUNT=0.001` (or less) for first live runs.
+  - Align `HEDGE_*_PRICE_TICK` and `HEDGE_*_QTY_STEP` with venue filters; zero or negative values trigger validation errors.
+  - Modify ROI targets by editing `.env` and restarting.
+
 ## Command Cheatsheet
 ```bash
 bun run index.ts   # Launch the CLI (default entrypoint)
 bun run start      # Alias for bun run index.ts
 bun run dev        # Development entrypoint
 bun x vitest run   # Execute the full Vitest suite
+bun run index.ts --strategy grvt-bingx-hedge --silent   # Shortcut to silent hedge mode
 ```
 
 ## Silent & Background Execution
@@ -137,6 +163,7 @@ Skip the Ink menu and start a strategy directly:
 bun run index.ts --strategy trend --silent
 bun run index.ts --strategy maker --silent
 bun run index.ts --strategy offset-maker --silent
+bun run index.ts --strategy grvt-bingx-hedge --silent
 ```
 Combine with `--exchange/-e` to pin the venue for that run.
 
@@ -146,6 +173,7 @@ Convenience aliases exposed via `package.json`:
 bun run start:trend:silent
 bun run start:maker:silent
 bun run start:offset:silent
+bun run start:grvt-bingx-hedge:silent
 ```
 
 ### Daemonising with pm2
@@ -158,6 +186,7 @@ You can also call the bundled scripts:
 bun run pm2:start:trend
 bun run pm2:start:maker
 bun run pm2:start:offset
+bun run pm2:start:grvt-bingx-hedge
 ```
 Run `pm2 save` afterwards if you want the process list to survive reboots.
 

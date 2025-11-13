@@ -11,9 +11,11 @@
     "start:trend:silent": "bun run index.ts --strategy trend --silent",
     "start:maker:silent": "bun run index.ts --strategy maker --silent",
     "start:offset:silent": "bun run index.ts --strategy offset-maker --silent",
+    "start:grvt-bingx-hedge:silent": "bun run index.ts --strategy grvt-bingx-hedge --silent",
     "pm2:start:trend": "pm2 start bun --name ritmex-trend --cwd . --restart-delay 5000 -- run index.ts --strategy trend --silent",
     "pm2:start:maker": "pm2 start bun --name ritmex-maker --cwd . --restart-delay 5000 -- run index.ts --strategy maker --silent",
-    "pm2:start:offset": "pm2 start bun --name ritmex-offset --cwd . --restart-delay 5000 -- run index.ts --strategy offset-maker --silent"
+    "pm2:start:offset": "pm2 start bun --name ritmex-offset --cwd . --restart-delay 5000 -- run index.ts --strategy offset-maker --silent",
+    "pm2:start:grvt-bingx-hedge": "pm2 start bun --name ritmex-grvt-bingx-hedge --cwd . --restart-delay 5000 -- run index.ts --strategy grvt-bingx-hedge --silent"
   },
   "devDependencies": {
     "@types/bun": "latest",
