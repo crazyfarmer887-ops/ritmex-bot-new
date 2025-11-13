@@ -133,12 +133,23 @@ function resolveBingxCredentials(symbol: string): BingxCredentials {
     throw new Error("BingX 需要配置 BINGX_API_KEY 与 BINGX_API_SECRET 环境变量");
   }
   const leverage = parseOptionalNumber(process.env.BINGX_LEVERAGE) ?? 50;
+  const positionModeRaw = process.env.BINGX_POSITION_MODE;
+  let positionMode: "ONE_WAY" | "HEDGE" | undefined = undefined;
+  if (positionModeRaw) {
+    const normalized = positionModeRaw.trim().toUpperCase().replace(/[-\s]/g, "_");
+    if (normalized === "HEDGE" || normalized === "HEDGE_MODE" || normalized === "DUAL") {
+      positionMode = "HEDGE";
+    } else if (normalized === "ONE_WAY" || normalized === "ONEWAY") {
+      positionMode = "ONE_WAY";
+    }
+  }
   const credentials: BingxCredentials = {
     apiKey,
     apiSecret,
     symbol: process.env.BINGX_SYMBOL ?? symbol,
     leverage,
     marginMode: process.env.BINGX_MARGIN_MODE,
+    positionMode,
     testnet: parseOptionalBoolean(process.env.BINGX_TESTNET),
   };
   return credentials;
