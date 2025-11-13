@@ -78,8 +78,9 @@ function normalizeExchangeId(value: string | undefined | null): string | undefin
 }
 
 function resolveExchangeKey(adapter: ExchangeAdapter): ExchangeKey {
+  const fromAdapter = normalizeExchangeId(adapter.id);
   const fromEnv = normalizeExchangeId(process.env.TRADE_EXCHANGE ?? process.env.EXCHANGE);
-  const candidates = [fromEnv, normalizeExchangeId(adapter.id)];
+  const candidates = [fromAdapter, fromEnv];
   for (const candidate of candidates) {
     if (!candidate) continue;
     if ((knownExchanges as string[]).includes(candidate)) {
