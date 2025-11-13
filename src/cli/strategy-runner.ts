@@ -1,3 +1,4 @@
+import { createInterface } from "node:readline/promises";
 import {
   basisConfig,
   gridConfig,
@@ -118,42 +119,43 @@ const STRATEGY_FACTORIES: Record<StrategyId, StrategyRunner> = {
       offUpdate: (emitter) => engine.off("update", emitter),
     });
   },
-    grid: async (opts) => {
-      const config = gridConfig;
-      const adapter = createAdapterOrThrow(config.symbol);
-      const engine = new GridEngine(config, adapter);
-      await runEngine({
-        engine,
-        strategy: "grid",
-        silent: opts.silent,
-        getSnapshot: () => engine.getSnapshot(),
-        onUpdate: (emitter) => engine.on("update", emitter),
-        offUpdate: (emitter) => engine.off("update", emitter),
-      });
-    },
-    "grvt-bingx-hedge": async (opts) => {
-      const grvtAdapter = buildAdapterFromEnv({
-        exchangeId: "grvt",
-        symbol: hedgeConfig.grvtSymbol,
-      });
-      const bingxAdapter = buildAdapterFromEnv({
-        exchangeId: "bingx",
-        symbol: hedgeConfig.bingxSymbol,
-      });
-      if (!grvtAdapter || !bingxAdapter) {
-        throw new Error("无法创建交易所适配器，请检查环境变量配置");
-      }
-      const engine = new GrvtBingxHedgeEngine(hedgeConfig, { grvtAdapter, bingxAdapter });
-      await runEngine({
-        engine,
-        strategy: "grvt-bingx-hedge",
-        silent: opts.silent,
-        exchangeName: "GRVT + BingX",
-        getSnapshot: () => engine.getSnapshot(),
-        onUpdate: (emitter) => engine.on("update", emitter),
-        offUpdate: (emitter) => engine.off("update", emitter),
-      });
-    },
+  grid: async (opts) => {
+    const config = gridConfig;
+    const adapter = createAdapterOrThrow(config.symbol);
+    const engine = new GridEngine(config, adapter);
+    await runEngine({
+      engine,
+      strategy: "grid",
+      silent: opts.silent,
+      getSnapshot: () => engine.getSnapshot(),
+      onUpdate: (emitter) => engine.on("update", emitter),
+      offUpdate: (emitter) => engine.off("update", emitter),
+    });
+  },
+  "grvt-bingx-hedge": async (opts) => {
+    const config = await resolveHedgeRuntimeConfig(opts);
+    const grvtAdapter = buildAdapterFromEnv({
+      exchangeId: "grvt",
+      symbol: config.grvtSymbol,
+    });
+    const bingxAdapter = buildAdapterFromEnv({
+      exchangeId: "bingx",
+      symbol: config.bingxSymbol,
+    });
+    if (!grvtAdapter || !bingxAdapter) {
+      throw new Error("无法创建交易所适配器，请检查环境变量配置");
+    }
+    const engine = new GrvtBingxHedgeEngine(config, { grvtAdapter, bingxAdapter });
+    await runEngine({
+      engine,
+      strategy: "grvt-bingx-hedge",
+      silent: opts.silent,
+      exchangeName: "GRVT + BingX",
+      getSnapshot: () => engine.getSnapshot(),
+      onUpdate: (emitter) => engine.on("update", emitter),
+      offUpdate: (emitter) => engine.off("update", emitter),
+    });
+  },
 };
 
 interface EngineHarness<TSnapshot> {
@@ -236,6 +238,60 @@ async function runEngine<
     process.on("SIGINT", wrapper);
     process.on("SIGTERM", wrapper);
   });
+}
+
+async function resolveHedgeRuntimeConfig(options: RunnerOptions): Promise<typeof hedgeConfig> {
+  if (options.silent || !process.stdin.isTTY || !process.stdout.isTTY) {
+    if (hedgeConfig.orderAmount <= 0) {
+      throw new Error("对冲下单数量必须大于 0 (HEDGE_ORDER_AMOUNT)");
+    }
+    return hedgeConfig;
+  }
+
+  const orderAmount = await promptPositiveHedgeAmount(hedgeConfig.orderAmount);
+  console.info(`[${STRATEGY_LABELS["grvt-bingx-hedge"]}] 对冲下单数量设定为 ${orderAmount}`);
+  return { ...hedgeConfig, orderAmount };
+}
+
+async function promptPositiveHedgeAmount(defaultAmount: number): Promise<number> {
+  const fallback = Number.isFinite(defaultAmount) && defaultAmount > 0 ? defaultAmount : null;
+  const prompt =
+    fallback != null
+      ? `请输入对冲下单数量 (默认 ${fallback}): `
+      : "请输入对冲下单数量 (必须大于 0): ";
+  const rl = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  try {
+    while (true) {
+      let answer: string;
+      try {
+        answer = await rl.question(prompt);
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+          throw new Error("已取消对冲模式启动");
+        }
+        throw error;
+      }
+      const trimmed = answer.trim();
+      if (!trimmed) {
+        if (fallback != null) {
+          return fallback;
+        }
+        console.info("当前默认值无效，请输入大于 0 的数字。");
+        continue;
+      }
+      const parsed = Number(trimmed);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return parsed;
+      }
+      console.info("请输入大于 0 的数字。");
+    }
+  } finally {
+    rl.close();
+  }
 }
 
 function createAdapterOrThrow(symbol: string): ExchangeAdapter {
