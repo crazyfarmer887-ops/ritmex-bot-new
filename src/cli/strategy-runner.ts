@@ -20,6 +20,7 @@ import {
   type GrvtBingxHedgeSnapshot,
 } from "../strategy/grvt-bingx-hedge-engine";
 import { extractMessage } from "../utils/errors";
+import { promptHedgeOverrides } from "./hedge-prompts";
 import type { StrategyId } from "./args";
 
 interface RunnerOptions {
@@ -99,25 +100,25 @@ const STRATEGY_FACTORIES: Record<StrategyId, StrategyRunner> = {
       offUpdate: (emitter) => engine.off("update", emitter),
     });
   },
-  basis: async (opts) => {
-    if (!isBasisStrategyEnabled()) {
-      throw new Error("Basis arbitrage strategy is disabled. Set ENABLE_BASIS_STRATEGY=true to enable it.");
-    }
-    const exchangeId = resolveExchangeId();
-    if (exchangeId !== "aster") {
-      throw new Error("Basis arbitrage strategy currently only supports the Aster exchange");
-    }
-    const adapter = createAdapterOrThrow(basisConfig.futuresSymbol);
-    const engine = new BasisArbEngine(basisConfig, adapter);
-    await runEngine({
-      engine,
-      strategy: "basis",
-      silent: opts.silent,
-      getSnapshot: () => engine.getSnapshot(),
-      onUpdate: (emitter) => engine.on("update", emitter),
-      offUpdate: (emitter) => engine.off("update", emitter),
-    });
-  },
+    basis: async (opts) => {
+      if (!isBasisStrategyEnabled()) {
+        throw new Error("Basis arbitrage strategy is disabled. Set ENABLE_BASIS_STRATEGY=true to enable it.");
+      }
+      const exchangeId = resolveExchangeId();
+      if (exchangeId !== "aster") {
+        throw new Error("Basis arbitrage strategy currently only supports the Aster exchange");
+      }
+      const adapter = createAdapterOrThrow(basisConfig.futuresSymbol);
+      const engine = new BasisArbEngine(basisConfig, adapter);
+      await runEngine({
+        engine,
+        strategy: "basis",
+        silent: opts.silent,
+        getSnapshot: () => engine.getSnapshot(),
+        onUpdate: (emitter) => engine.on("update", emitter),
+        offUpdate: (emitter) => engine.off("update", emitter),
+      });
+    },
     grid: async (opts) => {
       const config = gridConfig;
       const adapter = createAdapterOrThrow(config.symbol);
@@ -132,18 +133,22 @@ const STRATEGY_FACTORIES: Record<StrategyId, StrategyRunner> = {
       });
     },
     "grvt-bingx-hedge": async (opts) => {
+      const overrides =
+        opts.silent === true ? null : await promptHedgeOverrides(hedgeConfig);
+      const config = overrides ? { ...hedgeConfig, ...overrides } : hedgeConfig;
+
       const grvtAdapter = buildAdapterFromEnv({
         exchangeId: "grvt",
-        symbol: hedgeConfig.grvtSymbol,
+        symbol: config.grvtSymbol,
       });
       const bingxAdapter = buildAdapterFromEnv({
         exchangeId: "bingx",
-        symbol: hedgeConfig.bingxSymbol,
+        symbol: config.bingxSymbol,
       });
       if (!grvtAdapter || !bingxAdapter) {
         throw new Error("无法创建交易所适配器，请检查环境变量配置");
       }
-      const engine = new GrvtBingxHedgeEngine(hedgeConfig, { grvtAdapter, bingxAdapter });
+      const engine = new GrvtBingxHedgeEngine(config, { grvtAdapter, bingxAdapter });
       await runEngine({
         engine,
         strategy: "grvt-bingx-hedge",
