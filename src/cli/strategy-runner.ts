@@ -1,3 +1,6 @@
+import { createInterface } from "node:readline/promises";
+import { stdin as stdinStream, stdout as stdoutStream } from "node:process";
+
 import {
   basisConfig,
   gridConfig,
@@ -5,6 +8,7 @@ import {
   isBasisStrategyEnabled,
   makerConfig,
   tradingConfig,
+  type HedgeConfig,
 } from "../config";
 import { getExchangeDisplayName, resolveExchangeId } from "../exchanges/create-adapter";
 import type { ExchangeAdapter } from "../exchanges/adapter";
@@ -132,18 +136,19 @@ const STRATEGY_FACTORIES: Record<StrategyId, StrategyRunner> = {
       });
     },
     "grvt-bingx-hedge": async (opts) => {
+      const config = await resolveGrvtBingxHedgeConfig(hedgeConfig, opts);
       const grvtAdapter = buildAdapterFromEnv({
         exchangeId: "grvt",
-        symbol: hedgeConfig.grvtSymbol,
+        symbol: config.grvtSymbol,
       });
       const bingxAdapter = buildAdapterFromEnv({
         exchangeId: "bingx",
-        symbol: hedgeConfig.bingxSymbol,
+        symbol: config.bingxSymbol,
       });
       if (!grvtAdapter || !bingxAdapter) {
         throw new Error("无法创建交易所适配器，请检查环境变量配置");
       }
-      const engine = new GrvtBingxHedgeEngine(hedgeConfig, { grvtAdapter, bingxAdapter });
+      const engine = new GrvtBingxHedgeEngine(config, { grvtAdapter, bingxAdapter });
       await runEngine({
         engine,
         strategy: "grvt-bingx-hedge",
@@ -155,6 +160,128 @@ const STRATEGY_FACTORIES: Record<StrategyId, StrategyRunner> = {
       });
     },
 };
+
+type HedgePrompt = ReturnType<typeof createInterface>;
+
+async function resolveGrvtBingxHedgeConfig(
+  baseConfig: HedgeConfig,
+  opts: RunnerOptions = {}
+): Promise<HedgeConfig> {
+  const silent = Boolean(opts.silent);
+  const interactive = !silent && Boolean(stdinStream?.isTTY && stdoutStream?.isTTY);
+  const sanitizedConfig: HedgeConfig = { ...baseConfig };
+
+  if (!interactive) {
+    if (sanitizedConfig.orderAmount <= 0) {
+      throw new Error(
+        "[GRVT-BingX Hedge] HEDGE_ORDER_AMOUNT 必须大于 0。请设置环境变量或在交互模式下输入有效数值。"
+      );
+    }
+    return sanitizedConfig;
+  }
+
+  const rl = createInterface({ input: stdinStream, output: stdoutStream });
+  console.info(
+    `[${STRATEGY_LABELS["grvt-bingx-hedge"]}] 启动前需要确认参数，直接回车可保留默认值。`
+  );
+
+  try {
+    const grvtSymbol = await askSymbol(rl, "GRVT 合约代码", sanitizedConfig.grvtSymbol);
+    const bingxSymbol = await askSymbol(rl, "BingX 合约代码", sanitizedConfig.bingxSymbol);
+    const orderAmount = await askPositiveNumber(
+      rl,
+      "对冲下单数量",
+      sanitizedConfig.orderAmount
+    );
+    const exitRoiPercent = await askNonNegativeNumber(
+      rl,
+      "退出 ROI 百分比",
+      sanitizedConfig.exitRoiPercent
+    );
+
+    return {
+      ...sanitizedConfig,
+      grvtSymbol,
+      bingxSymbol,
+      orderAmount,
+      exitRoiPercent,
+    };
+  } finally {
+    rl.close();
+  }
+}
+
+async function askSymbol(rl: HedgePrompt, label: string, defaultValue: string): Promise<string> {
+  while (true) {
+    const answer = (await rl.question(`${label} [默认: ${defaultValue}]: `)).trim();
+    if (!answer) {
+      return defaultValue;
+    }
+    if (answer.length < 2) {
+      console.info(`[${STRATEGY_LABELS["grvt-bingx-hedge"]}] 请输入有效的合约代码。`);
+      continue;
+    }
+    return answer.toUpperCase();
+  }
+}
+
+async function askPositiveNumber(
+  rl: HedgePrompt,
+  label: string,
+  defaultValue: number
+): Promise<number> {
+  while (true) {
+    const defaultHint =
+      Number.isFinite(defaultValue) && defaultValue > 0 ? ` [默认: ${defaultValue}]` : "";
+    const answer = (await rl.question(`${label}${defaultHint}: `)).trim();
+    if (!answer) {
+      if (defaultValue > 0) {
+        return defaultValue;
+      }
+      console.info(`[${STRATEGY_LABELS["grvt-bingx-hedge"]}] 默认值无效，请输入大于 0 的数值。`);
+      continue;
+    }
+    const parsed = Number(answer);
+    if (!Number.isFinite(parsed)) {
+      console.info(`[${STRATEGY_LABELS["grvt-bingx-hedge"]}] 请输入有效的数字。`);
+      continue;
+    }
+    if (parsed <= 0) {
+      console.info(`[${STRATEGY_LABELS["grvt-bingx-hedge"]}] 数值必须大于 0。`);
+      continue;
+    }
+    return parsed;
+  }
+}
+
+async function askNonNegativeNumber(
+  rl: HedgePrompt,
+  label: string,
+  defaultValue: number
+): Promise<number> {
+  while (true) {
+    const defaultHint =
+      Number.isFinite(defaultValue) && defaultValue >= 0 ? ` [默认: ${defaultValue}]` : "";
+    const answer = (await rl.question(`${label}${defaultHint}: `)).trim();
+    if (!answer) {
+      if (defaultValue >= 0) {
+        return defaultValue;
+      }
+      console.info(`[${STRATEGY_LABELS["grvt-bingx-hedge"]}] 默认值无效，请输入大于等于 0 的数值。`);
+      continue;
+    }
+    const parsed = Number(answer);
+    if (!Number.isFinite(parsed)) {
+      console.info(`[${STRATEGY_LABELS["grvt-bingx-hedge"]}] 请输入有效的数字。`);
+      continue;
+    }
+    if (parsed < 0) {
+      console.info(`[${STRATEGY_LABELS["grvt-bingx-hedge"]}] 数值不能为负数。`);
+      continue;
+    }
+    return parsed;
+  }
+}
 
 interface EngineHarness<TSnapshot> {
   engine: { start(): void; stop(): void };
