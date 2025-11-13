@@ -115,7 +115,7 @@ const POSITION_EPS = 1e-6;
 
 export class GrvtBingxHedgeEngine {
   private readonly events = new StrategyEventEmitter<HedgeEvent, GrvtBingxHedgeSnapshot>();
-  private readonly tradeLog = createTradeLog(this.config.maxLogEntries);
+  private readonly tradeLog: ReturnType<typeof createTradeLog>;
   private readonly now: () => number;
   private readonly roiDecimal: number;
   private readonly legs: Record<HedgeLegKey, HedgeLegState>;
@@ -131,6 +131,7 @@ export class GrvtBingxHedgeEngine {
   private exitCompletionLogged = false;
 
   constructor(private readonly config: HedgeConfig, deps: HedgeEngineDeps) {
+    this.tradeLog = createTradeLog(config.maxLogEntries);
     this.now = deps.now ?? (() => Date.now());
     this.roiDecimal = Number.isFinite(config.exitRoiPercent)
       ? Math.max(0, config.exitRoiPercent) / 100
