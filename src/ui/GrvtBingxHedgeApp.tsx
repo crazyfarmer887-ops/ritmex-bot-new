@@ -39,6 +39,9 @@ export function GrvtBingxHedgeApp({ onExit }: GrvtBingxHedgeAppProps) {
         exchangeId: "bingx",
         symbol: hedgeConfig.bingxSymbol,
       });
+      if (!grvtAdapter || !bingxAdapter) {
+        throw new Error("无法创建交易所适配器，请检查环境变量配置");
+      }
       const engine = new GrvtBingxHedgeEngine(hedgeConfig, { grvtAdapter, bingxAdapter });
       engineRef.current = engine;
       setSnapshot(engine.getSnapshot());
